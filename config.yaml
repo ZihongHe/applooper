@@ -1,0 +1,13 @@
+# Fill in your own keys. Leave unused providers blank.
+# Do not commit a filled copy of this file.
+host: 127.0.0.1
+port: 8765
+projects_dir: ./workspaces   # or an absolute local folder
+
+llm:
+  provider: ""          # agnes | claude | openrouter
+  agnes_api_key: ""
+  agnes_base_url: "https://api.agnes-ai.cn/v1"
+  anthropic_api_key: ""
+  openrouter_api_key: ""
+  model: ""

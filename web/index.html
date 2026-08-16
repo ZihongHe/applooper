@@ -1,0 +1,1280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f7f8fa" />
+    <meta name="color-scheme" content="light" />
+    <meta name="apple-mobile-web-app-title" content="AppLooper" />
+    <meta name="description" content="Track application development, experience feedback, and developer-agent conversations in one place." data-i18n-content="meta.description" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+    <link rel="stylesheet" href="./styles.css?v=198" />
+    <title>AppLooper</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#chatStream" data-i18n="a11y.skip_to_chat">Skip to the developer-agent conversation</a>
+
+    <section class="access-gate is-loading" id="accessGate" aria-label="Access AppLooper" data-i18n-aria-label="access.gate_aria">
+      <div class="access-card">
+        <div class="access-topbar">
+          <div class="access-brand" aria-hidden="true">
+            <img class="brand-mark" src="./icon.svg" alt="" />
+            <span>
+              <strong data-i18n="brand.name">AppLooper</strong>
+              <small data-i18n="brand.tagline">Start building your application</small>
+            </span>
+          </div>
+          <div class="language-switch" role="group" aria-label="Interface language" data-i18n-aria-label="language.label">
+            <button class="language-option" type="button" data-language="zh-CN" data-i18n="language.zh_long">ZH</button>
+            <button class="language-option" type="button" data-language="en" data-i18n="language.en_short">EN</button>
+          </div>
+        </div>
+
+        <div class="access-state" id="accessChecking" role="status">
+          <span class="access-spinner" aria-hidden="true"></span>
+          <h1 id="accessGateTitle" data-i18n="access.connecting_title">AppLooper is loading…</h1>
+        </div>
+
+        <form class="access-state" id="accessForm" novalidate hidden>
+          <span class="access-kicker" data-i18n="access.first_connection">首次连接</span>
+          <h1 data-i18n="access.connect_title">连接你的电脑</h1>
+          <p id="accessHelp" data-i18n="access.help">建议先把此页添加到主屏幕，再从桌面图标打开并输入电脑显示的 6 位配对码。</p>
+          <label class="access-code-label" for="accessCodeInput" data-i18n="access.code_label">6 位配对码</label>
+          <input
+            class="access-code-input"
+            id="accessCodeInput"
+            name="pairing_code"
+            type="text"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            enterkeyhint="go"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            maxlength="6"
+            pattern="[0-9]{6}"
+            aria-describedby="accessHelp accessError"
+            placeholder="000000"
+          />
+          <p class="access-error" id="accessError" role="alert" hidden></p>
+          <button class="primary-button access-submit" id="accessSubmitButton" type="submit" disabled data-i18n="access.connect_button">连接电脑</button>
+          <p class="access-footnote" data-i18n="access.footnote">配对码 5 分钟内有效。连接成功后，这台手机 90 天内无需重复登录。</p>
+        </form>
+
+        <div class="access-state access-success" id="accessSuccess" hidden>
+          <span class="access-success-mark" aria-hidden="true">✓</span>
+          <h1 data-i18n="access.success_title">连接成功</h1>
+          <p data-i18n="access.success_copy">连接已保存 90 天。要在退出页面后收到研发提醒，再完成下面两步。</p>
+          <ol class="access-install-steps">
+            <li data-i18n="access.install_step_share">点击 Safari 右下角“…”；如果看到了“分享”图标，也可直接点击</li>
+            <li data-i18n="access.install_step_home">选择“分享”→“添加到主屏幕”，再从桌面打开 AppLooper</li>
+          </ol>
+          <button class="primary-button access-submit" id="enterWorkspaceButton" type="button" data-i18n="access.enter">进入工作台</button>
+        </div>
+
+        <div class="access-state" id="accessUnavailable" hidden>
+          <span class="access-warning-mark" aria-hidden="true">!</span>
+          <h1 data-i18n="access.unavailable_title">暂时无法连接电脑</h1>
+          <p id="accessUnavailableText" data-i18n="access.unavailable_copy">请确认电脑在线且网页服务仍在运行。</p>
+          <button class="secondary-button access-submit" id="accessRetryButton" type="button" data-i18n="access.retry">重新连接</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="offlineBanner" class="offline-banner" role="status" hidden data-i18n="connection.offline_banner">
+      当前处于离线状态，已加载的内容仍可查看。
+    </div>
+
+    <div id="claudeWarning" class="claude-warning" role="alert" hidden>
+      <span class="claude-warning-icon" aria-hidden="true">!</span>
+      <span data-i18n="coding.none_warning">未检测到可用的本地 Coding 软件，请安装 Codex 或 Claude Code 后刷新</span>
+    </div>
+
+    <div class="workspace" id="workspace" hidden>
+      <aside class="home-screen-tip" id="homeScreenTip" role="status" hidden>
+        <span class="home-screen-tip-copy" data-i18n="install.mobile_tip">小提示：打开浏览器菜单或“分享”，选择“添加到主屏幕”，以后可从桌面打开 AppLooper。</span>
+        <button class="home-screen-tip-action" id="homeScreenTipAction" type="button" data-i18n="install.mobile_tip_action">查看步骤</button>
+        <button class="home-screen-tip-close" id="dismissHomeScreenTipButton" type="button" aria-label="关闭添加到主屏幕提示" data-i18n-aria-label="install.mobile_tip_close">×</button>
+      </aside>
+      <aside class="panel apps-panel" id="appsPanel" aria-label="My apps" data-i18n-aria-label="apps.mine">
+        <div class="brand-row">
+          <a class="brand" href="./" aria-label="AppLooper home" data-i18n-aria-label="nav.home">
+            <img class="brand-mark" src="./icon.svg" alt="" aria-hidden="true" />
+            <span>
+            <strong data-i18n="brand.name">AppLooper</strong>
+              <small data-i18n="brand.tagline">开始构建你的应用</small>
+            </span>
+          </a>
+          <button class="drawer-install-button mobile-only" id="drawerInstallButton" type="button" data-i18n="install.home">添加到主屏幕</button>
+          <button class="icon-button mobile-only" type="button" data-close-drawer aria-label="Close app list" data-i18n-aria-label="nav.close_apps">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <div class="apps-toolbar">
+          <h1 data-i18n="apps.mine">我的应用</h1>
+          <button class="primary-button compact" id="openCreateButton" type="button">
+            <span aria-hidden="true">＋</span>
+            <span data-i18n="apps.new">新建</span>
+          </button>
+        </div>
+
+        <div class="app-list" id="appList" role="list" aria-live="polite">
+          <div class="loading-list" aria-label="Loading apps" data-i18n-aria-label="apps.loading">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+
+        <div class="panel-footer">
+          <span class="connection-state">
+            <span class="connection-dot" id="connectionDot" aria-hidden="true"></span>
+            <span id="connectionText" data-i18n="connection.connecting">正在连接</span>
+          </span>
+          <div class="panel-footer-actions">
+            <div class="language-switch language-switch-compact" role="group" aria-label="界面语言" data-i18n-aria-label="language.label">
+              <button class="language-option" type="button" data-language="zh-CN" data-i18n="language.zh_short">中</button>
+              <button class="language-option" type="button" data-language="en" data-i18n="language.en_short">EN</button>
+            </div>
+            <button class="install-button" id="installButton" type="button" hidden data-i18n="install.device">安装到设备</button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="chat-panel" id="mainContent">
+        <header class="chat-header">
+          <button class="icon-button mobile-only mobile-nav-button" id="openAppsButton" type="button" aria-label="切换应用" data-i18n-aria-label="nav.open_other_apps">
+            <span class="mobile-nav-label" data-i18n="nav.other_apps">切换</span>
+          </button>
+
+          <div class="chat-heading">
+            <div class="title-line">
+              <h2 id="appTitle" data-i18n="apps.select">选择一个应用</h2>
+              <span class="status-badge" id="statusBadge" hidden></span>
+            </div>
+            <div class="phase-line" id="phaseLine" hidden>
+              <span id="phaseText"></span>
+              <span id="engineSeparator" aria-hidden="true" hidden>·</span>
+              <span id="engineText" hidden></span>
+              <span aria-hidden="true">·</span>
+              <span id="updatedText"></span>
+            </div>
+            <div class="workspace-line" id="workspaceLine" hidden>
+              <button class="text-button workspace-edit-button workspace-primary-edit-button" id="editWorkspaceButton" type="button" data-i18n="workspace.edit">编辑</button>
+              <span class="workspace-label">Workspace</span>
+              <span id="workspaceText"></span>
+            </div>
+            <div class="coding-agent-error-line" id="codingAgentErrorLine" hidden>
+              <span id="codingAgentErrorText"></span>
+            </div>
+          </div>
+
+          <div class="header-actions">
+            <button class="secondary-button compact experience-twin-entry" id="openExperienceTwinButton" type="button" hidden>
+              <span class="experience-twin-entry-long" data-i18n="twin.open">试用</span>
+              <span class="experience-twin-entry-short" data-i18n="twin.open_short">试用</span>
+            </button>
+            <div class="workflow-action-stack">
+              <button class="secondary-button compact" id="workflowActionButton" type="button" hidden></button>
+              <button class="text-button header-advanced-button" id="editCodingAgentButton" type="button" data-i18n="coding_agent.edit">高级参数</button>
+            </div>
+            <button class="icon-button mobile-only mobile-nav-button" id="openMembersButton" type="button" aria-label="打开智能体" data-i18n-aria-label="nav.open_agents">
+              <span class="mobile-nav-label" data-i18n="nav.agents">智能体</span>
+            </button>
+          </div>
+        </header>
+
+        <nav class="conversation-tabs" id="conversationTabs" role="tablist" aria-label="Switch between Chat, Develop, Try, Launch, and Operations" data-i18n-aria-label="conversation.tabs_aria" hidden>
+          <button class="conversation-tab is-active" id="experienceConversationTab" type="button" role="tab" aria-selected="true" aria-controls="chatStream" data-chat-view="developer">
+            <span class="conversation-tab-label">
+              <span data-i18n="conversation.experience">研发</span>
+              <span class="conversation-tab-unread is-experience" id="experienceConversationUnread" hidden></span>
+            </span>
+            <small id="experienceConversationCount" data-i18n="conversation.developer_hint">直接对话</small>
+          </button>
+          <button class="conversation-tab experience-twin-tab" id="experienceTwinTab" type="button" role="tab" aria-selected="false" aria-controls="experienceTwinPage">
+            <span class="conversation-tab-label">
+              <span data-i18n="validation.tab">试用</span>
+              <span class="conversation-tab-unread is-trial" id="experienceTwinUnread" hidden></span>
+            </span>
+            <small data-i18n="validation.tab_hint">验证与反馈</small>
+          </button>
+          <button class="conversation-tab launch-tab" id="launchTab" type="button" role="tab" aria-selected="false" aria-controls="launchPage">
+            <span class="conversation-tab-label">
+              <span data-i18n="launch.tab">发布</span>
+              <span class="conversation-tab-unread is-launch" id="launchUnread" hidden></span>
+            </span>
+            <small data-i18n="launch.tab_hint">版本与上线</small>
+          </button>
+        </nav>
+
+        <section class="experience-twin-page" id="experienceTwinPage" role="tabpanel" aria-labelledby="experienceTwinTab" data-trial-layout="shared-validation-workspace" hidden>
+          <header class="experience-twin-toolbar" hidden aria-hidden="true">
+            <button class="text-button experience-twin-back" id="closeExperienceTwinButton" type="button">
+              <span aria-hidden="true">←</span>
+              <span data-i18n="twin.back">返回对话</span>
+            </button>
+            <div class="experience-twin-heading">
+              <strong data-i18n="twin.title">远程试用</strong>
+              <span id="experienceTwinSummary" data-i18n="twin.subtitle">选择应用形态后，直接远程操作电脑上的真实运行环境</span>
+            </div>
+            <span class="experience-twin-shared" id="experienceTwinShared" hidden data-i18n="twin.shared">统一远程会话</span>
+          </header>
+
+          <div class="trial-feedback-actions">
+            <button class="text-button" id="validationRecordsButton" type="button" data-i18n="validation.records">查看内测记录</button>
+          </div>
+
+          <div class="experience-twin-body" id="experienceTwinBody">
+            <aside class="experience-twin-sidebar">
+              <nav class="experience-twin-views" id="experienceTwinViews" aria-label="体验视图" data-i18n-aria-label="twin.views_aria"></nav>
+            </aside>
+            <div class="experience-twin-preview">
+              <aside class="experience-twin-verify-bubble" id="experienceTwinVerifyBubble" hidden>
+                <p id="experienceTwinVerifyCopy"></p>
+                <div class="experience-twin-verify-actions">
+                  <button class="primary-button" id="experienceTwinVerifyDone" type="button" data-i18n="release.verify_done">验证完毕</button>
+                </div>
+              </aside>
+              <div class="experience-twin-controls" id="experienceTwinControls" hidden>
+                <nav class="experience-twin-surface-switch" id="experienceTwinSurfaceSwitch" hidden aria-label="应用形态" data-i18n-aria-label="twin.views_aria"></nav>
+                <button class="experience-surface-add-button" id="addExperienceSurfaceButton" type="button" hidden>
+                  <span aria-hidden="true">＋</span>
+                  <span data-i18n="surface_add.action">添加形态</span>
+                </button>
+                <span class="experience-twin-size" id="experienceTwinSize"></span>
+                <section class="trial-sandbox-panel trial-intent-composer" id="trialSandboxPanel" aria-labelledby="trialSandboxTitle">
+                  <label class="trial-composer-label" id="trialSandboxTitle" for="trialSandboxInput" data-i18n="twin.sandbox_title">我要试用</label>
+                  <div class="trial-sandbox-form">
+                    <textarea id="trialSandboxInput" rows="1" data-i18n-placeholder="twin.sandbox_placeholder" placeholder="例如：我要试用一句话记录功能"></textarea>
+                    <button class="primary-button" id="trialSandboxConfigureButton" type="button" data-i18n="twin.sandbox_configure">告诉研发智能体</button>
+                  </div>
+                  <p class="trial-sandbox-status" id="trialSandboxStatus" aria-live="polite"></p>
+                </section>
+                <span class="experience-twin-control-spacer"></span>
+                <div class="experience-twin-mode" role="group" aria-label="预览缩放方式" data-i18n-aria-label="twin.scale_aria">
+                  <button class="experience-twin-mode-button is-active" id="experienceTwinFitButton" type="button" aria-pressed="true" data-i18n="twin.fit">适应窗口</button>
+                  <button class="experience-twin-mode-button" id="experienceTwinActualButton" type="button" aria-pressed="false" data-i18n="twin.actual">原始尺寸</button>
+                </div>
+                <button class="experience-twin-keyboard-button" id="experienceTwinKeyboardButton" type="button" aria-expanded="false" aria-controls="experienceTwinKeyboardInput" hidden>
+                  <span aria-hidden="true">⌨</span>
+                  <span data-i18n="twin.keyboard_open">键盘</span>
+                </button>
+                <button class="experience-twin-icon-button" id="reloadExperienceTwinButton" type="button" title="重新连接" data-i18n-title="twin.reload" aria-label="重新连接" data-i18n-aria-label="twin.reload">↻</button>
+                <button class="experience-twin-icon-button" id="openExperienceTwinWindowButton" type="button" title="在新窗口打开" data-i18n-title="twin.new_window" aria-label="在新窗口打开" data-i18n-aria-label="twin.new_window" hidden>↗</button>
+                <button class="experience-twin-stop-button" id="stopExperienceTwinButton" type="button" hidden data-i18n="twin.stop">结束试用</button>
+              </div>
+              <aside class="experience-twin-synthetic-notice" id="experienceTwinSyntheticNotice" role="note" hidden>
+                <p id="experienceTwinSyntheticNoticeCopy" data-i18n="twin.synthetic_only_notice">本试用仅可使用 AppLooper 生成或合成的数据。禁止输入真实密码、API 密钥、电话号码、电子邮箱、支付信息或账户凭据。</p>
+                <button class="experience-twin-synthetic-notice-close" id="experienceTwinSyntheticNoticeClose" type="button" aria-label="关闭此提示" data-i18n-aria-label="twin.synthetic_only_dismiss">&times;</button>
+              </aside>
+              <aside class="experience-twin-fidelity" id="experienceTwinFidelity" hidden>
+                <strong id="experienceTwinFidelityTitle">远程试用已连接</strong>
+                <span id="experienceTwinFidelityCopy">直接点击或触摸画面即可操作。</span>
+              </aside>
+              <aside class="experience-twin-local-access" id="experienceTwinLocalAccess" aria-live="polite" hidden></aside>
+              <details class="experience-twin-history" id="experienceTwinHistory">
+                <summary>
+                  <strong id="experienceTwinHistoryTitle">变更历史</strong>
+                  <span id="experienceTwinHistoryCount"></span>
+                </summary>
+                <ol id="experienceTwinHistoryList" aria-live="polite"></ol>
+              </details>
+              <div class="experience-twin-stage" id="experienceTwinStage">
+                <button class="experience-twin-icon-button experience-twin-stage-fullscreen" id="experienceTwinFullscreenButton" type="button" title="全屏呈现" data-i18n-title="twin.fullscreen_enter" aria-label="全屏呈现" data-i18n-aria-label="twin.fullscreen_enter" aria-pressed="false" hidden>
+                  <svg class="experience-twin-fullscreen-icon is-enter" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M4 10V4h6M14 4h6v6M20 14v6h-6M10 20H4v-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>
+                  </svg>
+                  <svg class="experience-twin-fullscreen-icon is-exit" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M9 4v5H4M15 4v5h5M4 15h5v5M20 15h-5v5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>
+                  </svg>
+                </button>
+                <button class="experience-twin-fullscreen-overlay-button" id="experienceTwinFullscreenOverlayButton" type="button" title="退出全屏" data-i18n-title="twin.fullscreen_exit" aria-label="退出全屏" data-i18n-aria-label="twin.fullscreen_exit">
+                  <svg class="experience-twin-fullscreen-icon is-exit" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M9 4v5H4M15 4v5h5M4 15h5v5M20 15h-5v5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path>
+                  </svg>
+                </button>
+                <div class="experience-twin-laser" id="experienceTwinLaser" hidden aria-hidden="true"></div>
+                <div class="experience-twin-state" id="experienceTwinState">
+                  <span class="progress-spinner" aria-hidden="true"></span>
+                  <strong data-i18n="twin.loading">正在读取可试用环境</strong>
+                  <span data-i18n="common.wait">请稍等片刻。</span>
+                </div>
+                <div class="experience-twin-frames" id="experienceTwinFrames" hidden></div>
+                <form class="experience-twin-ime-bridge" id="experienceTwinImeBridge" hidden>
+                  <span
+                    class="experience-twin-ime-badge experience-twin-ime-drag"
+                    id="experienceTwinImeDrag"
+                    role="button"
+                    tabindex="0"
+                    title="拖动可移开输入条"
+                    data-i18n-title="twin.ime_drag_title"
+                    aria-label="拖动可移开输入条"
+                    data-i18n-aria-label="twin.ime_drag_title"
+                    data-i18n="twin.ime_badge"
+                  >中 / EN</span>
+                  <input
+                    class="experience-twin-native-keyboard-capture"
+                    id="experienceTwinKeyboardInput"
+                    type="text"
+                    inputmode="text"
+                    enterkeyhint="send"
+                    autocomplete="off"
+                    autocapitalize="sentences"
+                    autocorrect="on"
+                    spellcheck="true"
+                    aria-label="输入中文或英文到试用窗口"
+                    data-i18n-aria-label="twin.keyboard_input_aria"
+                    placeholder="先点选试用窗口中的输入框，再在这里输入中文或 English"
+                    data-i18n-placeholder="twin.ime_placeholder"
+                  >
+                  <button class="experience-twin-ime-send" id="experienceTwinImeSendButton" type="submit" data-i18n="twin.ime_send">输入</button>
+                  <span class="experience-twin-ime-status" id="experienceTwinImeStatus" aria-live="polite"></span>
+                </form>
+              </div>
+              <section class="trial-feedback-box trial-feedback-composer" id="trialFeedbackBox" aria-labelledby="trialFeedbackTitle">
+                <label class="trial-composer-label" id="trialFeedbackTitle" for="trialFeedbackInput" data-i18n="twin.feedback_title">向研发智能体描述需要优化的点</label>
+                <div class="trial-feedback-actions">
+                  <textarea id="trialFeedbackInput" rows="1" data-i18n-placeholder="twin.feedback_placeholder" placeholder="例如：搜索结果不够清晰，希望突出匹配内容"></textarea>
+                  <button class="primary-button" id="trialFeedbackSendButton" type="button" data-i18n="twin.feedback_send">发送给研发智能体</button>
+                </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section class="launch-page operations-page" id="launchPage" role="tabpanel" aria-labelledby="launchTab" hidden>
+          <div class="operations-scroll launch-scroll">
+            <section class="operations-card launch-version-card">
+              <span class="operations-card-icon is-version" aria-hidden="true" data-i18n="icon.version">版</span>
+              <div>
+                <span data-i18n="operations.version">当前版本</span>
+                <strong id="operationsVersion">尚未形成可发布版本</strong>
+                <small id="operationsVersionCopy" data-i18n="operations.version_copy">新功能完成后自动形成一个版本</small>
+              </div>
+            </section>
+
+            <section class="operations-card launch-export-card">
+              <span class="operations-card-icon is-version" aria-hidden="true">↓</span>
+              <div>
+                <span data-i18n="export.download">下载应用包</span>
+                <strong data-i18n="export.copy">下载当前应用的源码压缩包。导出内容不含密钥。</strong>
+              </div>
+              <button class="primary-button" id="downloadSourceExportButton" type="button" data-i18n="export.download">下载应用包</button>
+            </section>
+
+            <section class="operations-skill-card" id="operationsLaunchSkillCard">
+              <span class="operations-card-icon is-launch-skill" aria-hidden="true" data-i18n="icon.launch">上</span>
+              <div>
+                <span data-i18n="operations.launch_skill">上线方式 Skill</span>
+                <strong id="operationsLaunchSkillName" data-i18n="operations.launch_skill_default">默认上线方式</strong>
+                <small class="operations-skill-status" id="operationsLaunchSkillStatus" data-state="unconfigured" data-i18n="operations.skill_unconfigured">尚未配置，智能体会在发布前提醒你</small>
+              </div>
+              <div class="operations-card-actions">
+                <button class="operations-card-action" id="operationsLaunchSkillEditButton" type="button" data-i18n="operations.skill_edit">编辑</button>
+                <button class="operations-card-action" id="projectSecretsButton" type="button" data-i18n="project_secrets.button">私密配置</button>
+                <button class="primary-button operations-deploy-action" id="operationsDeployButton" type="button" data-i18n="operations.deploy">手动上线</button>
+              </div>
+            </section>
+
+            <section class="launch-auto-policy" id="launchAutoPolicy">
+              <div class="launch-auto-policy-copy">
+                <span class="operations-eyebrow" data-i18n="launch.auto_policy_label">自动上线策略</span>
+                <strong data-i18n="launch.auto_policy_title">达到发布条件后自动推进</strong>
+                <p data-i18n="launch.auto_policy_copy">开启后，研发智能体会按上线 Skill 检查并准备发布；涉及付费、凭据或公开发布仍会先向你确认。</p>
+              </div>
+              <label class="launch-auto-toggle">
+                <input id="launchAutoToggle" type="checkbox" />
+                <span data-i18n="launch.auto_policy_toggle">启用自动上线</span>
+              </label>
+            </section>
+
+            <section class="owner-proxy-review" id="ownerProxyReview" aria-labelledby="ownerProxyTitle">
+              <header>
+                <strong id="ownerProxyTitle" data-i18n="release.owner_proxy_label">所有者意图模拟智能体 · 非您本人</strong>
+                <button class="text-button" id="ownerProxyBypassButton" type="button" data-i18n="release.owner_proxy_bypass">跳过此智能体复测</button>
+              </header>
+              <p data-i18n="release.owner_proxy_copy">仅依据您明确确认的需求、约束和反馈进行只读复测；不推断未表达偏好，也不能确认发布。</p>
+              <div id="ownerProxyProfile"></div>
+              <ol id="ownerProxyReceipts"></ol>
+            </section>
+
+            <section class="release-review-panel" id="releaseReviewPanel" hidden aria-labelledby="releaseReviewTitle">
+              <header class="release-review-header">
+                <div>
+                  <span class="operations-eyebrow" data-i18n="release.review_label">上线前审查</span>
+                  <strong id="releaseReviewTitle" data-i18n="release.review_title">逐项确认后再发布</strong>
+                  <p id="releaseReviewCopy" data-i18n="release.review_copy">这份清单只对应当前版本；请逐项确认核心功能。</p>
+                </div>
+                <span class="release-review-gate" id="releaseReviewGate" data-state="draft"></span>
+              </header>
+              <section class="release-review-snapshot" id="releaseReviewSnapshot" aria-labelledby="releaseReviewSnapshotTitle">
+                <div class="release-review-snapshot-heading">
+                  <div>
+                    <span class="operations-eyebrow" data-i18n="release.snapshot_label">返回验收时先看这里</span>
+                    <strong id="releaseReviewSnapshotTitle" data-i18n="release.snapshot_title">当前发布快照</strong>
+                  </div>
+                  <span class="release-review-candidate" id="releaseReviewSnapshotCandidate"></span>
+                </div>
+                <div class="release-acceptance-brief" id="releaseAcceptanceBrief">
+                  <div class="release-acceptance-thread">
+                    <div><span data-i18n="release.brief_who">谁遇到了什么</span><p><strong id="releaseAcceptanceBriefPersona"></strong><span id="releaseAcceptanceBriefFinding"></span></p></div>
+                    <div><span data-i18n="release.brief_change">本版本怎么改</span><p id="releaseAcceptanceBriefChange"></p></div>
+                    <div><span data-i18n="release.brief_check">您现在只需检查什么</span><p id="releaseAcceptanceBriefCheck"></p></div>
+                  </div>
+                  <button class="release-acceptance-screenshot" id="releaseAcceptanceBriefScreenshotButton" type="button" hidden>
+                    <span data-i18n="release.brief_screenshot">截图证据</span>
+                    <img id="releaseAcceptanceBriefScreenshot" alt="" loading="lazy" />
+                  </button>
+                  <p class="release-acceptance-screenshot-empty" id="releaseAcceptanceBriefScreenshotEmpty" data-i18n="release.brief_no_screenshot">本条发现没有可展示的界面截图；请以可执行试用窗口为准。</p>
+                  <p class="release-acceptance-gate" id="releaseAcceptanceBriefGate"></p>
+                  <p class="release-stop-rule" id="releaseAcceptanceBriefStopRule"></p>
+                </div>
+                <div class="release-review-snapshot-grid">
+                  <div><span data-i18n="release.snapshot_verified">已经验证</span><p id="releaseReviewSnapshotVerified"></p></div>
+                  <div><span data-i18n="release.snapshot_judgment">仍需你判断</span><p id="releaseReviewSnapshotJudgment"></p></div>
+                  <div><span data-i18n="release.snapshot_paths">建议试用路径</span><ol id="releaseReviewSnapshotPaths"></ol></div>
+                  <div><span data-i18n="release.snapshot_provenance">证据来源与边界</span><p id="releaseReviewSnapshotProvenance"></p></div>
+                </div>
+                <p class="release-review-scope" id="releaseReviewSnapshotScope"></p>
+              </section>
+              <div class="release-review-sections" id="releaseReviewSections"></div>
+              <section class="release-scenario-session" id="releaseScenarioSession" hidden aria-hidden="true">
+                <header>
+                  <strong id="releaseScenarioTitle" data-i18n="release.scenario_title">场景已准备</strong>
+                  <span id="releaseScenarioStatus"></span>
+                </header>
+                <p id="releaseScenarioProvenance"></p>
+                <p id="releaseScenarioCleanup"></p>
+                <div class="release-scenario-actions">
+                  <button class="secondary-button" id="releaseScenarioInteractedButton" type="button" data-i18n="release.scenario_interacted">我已实际操作</button>
+                  <button class="primary-button" id="releaseScenarioPassButton" type="button" data-i18n="release.scenario_pass" disabled>通过此场景</button>
+                  <button class="secondary-button" id="releaseScenarioReturnButton" type="button" data-i18n="release.scenario_return" disabled>退回修改</button>
+                </div>
+              </section>
+              <section class="release-final-verdict" id="releaseFinalVerdictPanel" aria-labelledby="releaseFinalVerdictTitle">
+                <header>
+                  <strong id="releaseFinalVerdictTitle" data-i18n="release.final_verdict_title">我的最终判定</strong>
+                  <p id="releaseFinalVerdictHint" data-i18n="release.final_verdict_hint">请先给每一项自验证功能标记通过或不通过，再做最终判定。</p>
+                </header>
+                <div class="release-final-verdict-actions">
+                  <button class="primary-button" id="releaseFinalPassButton" type="button" data-i18n="release.final_pass" disabled>我认为已符合发布条件</button>
+                  <button class="secondary-button" id="releaseFinalFailButton" type="button" data-i18n="release.final_fail" disabled>我认为暂不符合发布条件</button>
+                </div>
+              </section>
+              <div class="release-review-actions">
+                <button class="secondary-button" id="releaseReviewGuideButton" type="button" data-i18n="release.guide_me" hidden>带我检查</button>
+                <button class="secondary-button" id="releaseReviewDeferButton" type="button" data-i18n="release.defer" hidden>暂不上线</button>
+              </div>
+            </section>
+
+            <section class="operations-checklist" id="launchChecklist" aria-labelledby="launchChecklistTitle">
+              <header class="operations-checklist-header">
+                <div>
+                  <span class="operations-eyebrow" data-i18n="launch.checklist_label">上线向导</span>
+                  <strong id="launchChecklistTitle" data-i18n="launch.checklist_title">按步骤完成版本发布</strong>
+                  <p id="launchChecklistCopy" data-i18n="launch.checklist_copy">一次只处理一步；研发部署完成后，已识别环境会自动填入。</p>
+                </div>
+              </header>
+              <ol class="operations-checklist-steps" id="launchChecklistSteps" aria-live="polite"></ol>
+              <div class="operations-checklist-prefill" id="launchChecklistPrefill" hidden>
+                <strong id="launchChecklistPrefillTitle" data-i18n="operations.prefill_title">已识别环境（来自研发部署）</strong>
+                <ul id="launchChecklistPrefillList"></ul>
+              </div>
+              <button class="primary-button operations-checklist-action" id="launchChecklistAction" type="button" hidden></button>
+            </section>
+
+            <section class="operations-release" id="operationsRelease">
+              <div>
+                <span class="operations-eyebrow" data-i18n="operations.release_label">发布准备</span>
+                <strong id="operationsReleaseTitle" data-i18n="operations.release_waiting">还没到需要你处理发布的时候</strong>
+                <p id="operationsReleaseCopy" data-i18n="operations.release_waiting_copy">研发智能体会在合适的时候告诉你缺什么，并一次只让你决定一件事。</p>
+              </div>
+              <button class="secondary-button" id="operationsReleaseAction" type="button" data-i18n="operations.prepare_release">让智能体检查发布</button>
+            </section>
+
+            <details class="operations-history" id="operationsHistory">
+              <summary>
+                <strong data-i18n="launch.history">版本与发布记录</strong>
+                <span id="operationsHistoryCount">0</span>
+              </summary>
+              <ol id="operationsHistoryList"></ol>
+            </details>
+          </div>
+        </section>
+
+        <section class="developer-channel" id="developerChannel" aria-label="Virtual-user and real-user feedback exchange" data-i18n-aria-label="conversation.experience_aria" hidden>
+          <span class="developer-channel-avatar" id="developerChannelAvatar" aria-hidden="true">虚</span>
+          <span class="developer-channel-copy">
+            <strong id="developerChannelTitle" data-i18n="conversation.experience_title">迭代交流</strong>
+            <span id="developerChannelCopy" data-i18n="conversation.experience_copy">虚拟用户试用与真实用户打点反馈在这里交汇；运营智能体周期性汇总真实用户数据后反馈研发智能体，研发优化后会回复运营智能体。</span>
+          </span>
+          <span class="developer-channel-badge" id="developerChannelBadge" data-i18n="conversation.read_only">只读记录</span>
+        </section>
+
+        <section class="internal-test-analysis" id="internalTestAnalysis" hidden aria-labelledby="internalTestAnalysisTitle">
+          <header>
+            <div>
+              <strong id="internalTestAnalysisTitle" data-i18n="internal.analysis_title">独立内部测试分析智能体</strong>
+              <span class="simulated-evidence-label" data-i18n="internal.simulated_evidence_label">模拟证据 · 非真实用户/运营指标</span>
+            </div>
+            <p data-i18n="internal.analysis_copy">独立于研发智能体，负责归并可复现问题；不能修改应用或决定发布，也不将浏览或点击次数解释为兴趣。</p>
+          </header>
+          <div class="internal-test-analysis-summary" id="internalTestAnalysisSummary"></div>
+          <section class="test-maintainer-results" id="testMaintainerResults">
+            <strong data-i18n="internal.layered_evidence_title">分层测试证据（与真实运营数据分离）</strong>
+            <div id="testMaintainerSummary"></div>
+          </section>
+          <details>
+            <summary data-i18n="internal.raw_trails_summary">展开原始模拟轨迹</summary>
+            <ul id="internalTestAnalysisTrails"></ul>
+          </details>
+        </section>
+
+        <div class="experience-filters" id="experienceFilters" aria-label="Filter exchange records by virtual user" data-i18n-aria-label="conversation.filter_aria" hidden></div>
+
+        <section class="chat-stream" id="chatStream" role="tabpanel" tabindex="-1" aria-label="Conversation with the app-management agent" data-i18n-aria-label="conversation.main_aria" aria-live="polite">
+          <div class="welcome-state" id="welcomeState">
+            <div class="welcome-symbol" aria-hidden="true">研</div>
+            <h2 data-i18n="developer.welcome_title">直接告诉研发智能体你想做什么</h2>
+            <p data-i18n="developer.welcome_copy">创建应用后，研发智能体会在这里主动汇报进度、提出待确认问题；你也可以随时发送修改意见。</p>
+            <button class="primary-button" id="emptyCreateButton" type="button" data-i18n="apps.create_first">创建第一个应用</button>
+          </div>
+        </section>
+
+        <section class="pending-strip" id="pendingStrip" aria-label="An item from the developer agent needs your confirmation" data-i18n-aria-label="pending.card_aria" hidden>
+          <div class="pending-icon" aria-hidden="true">!</div>
+          <div>
+            <strong id="pendingTitle" data-i18n="pending.title">有一项内容需要确认</strong>
+            <p id="pendingSummary"></p>
+          </div>
+          <button class="text-button" id="replyPendingButton" type="button" data-i18n="pending.reply">回复研发智能体</button>
+        </section>
+
+        <footer class="composer" id="composer" hidden>
+          <div class="upload-preview" id="uploadPreview" aria-live="polite" hidden></div>
+          <div class="composer-target" id="developerComposerTarget" aria-label="当前消息发送对象：应用管理智能体" data-i18n-aria-label="composer.target_aria">
+            <span class="composer-target-avatar is-project-manager" aria-hidden="true" data-i18n="icon.project_manager">管</span>
+            <span class="composer-target-copy">
+              <strong data-i18n="composer.target">发送给研发智能体</strong>
+              <span data-i18n="composer.target_copy">直接写需求、问题或修改意见</span>
+            </span>
+            <button class="notification-composer-action" id="notificationPromptButton" type="button" hidden>
+              <span class="notification-composer-icon" aria-hidden="true">◉</span>
+              <span id="notificationPromptLabel" data-i18n="notification.composer_action">开启研发提醒</span>
+            </button>
+          </div>
+          <div class="composer-target" id="growthComposerTarget" hidden aria-label="当前消息发送对象：运营智能体" data-i18n-aria-label="growth.composer_target_aria">
+            <span class="composer-target-avatar" aria-hidden="true" data-i18n="icon.operations">营</span>
+            <span class="composer-target-copy">
+              <strong data-i18n="growth.composer_target">发送给运营智能体</strong>
+              <span data-i18n="growth.composer_target_copy">询问真实用户数据、异常或下一步运营动作</span>
+            </span>
+          </div>
+          <p class="notification-composer-help" id="notificationComposerHelp" role="status" hidden></p>
+          <div class="composer-row" id="composerRow">
+            <label class="sr-only" for="messageInput" data-i18n="composer.label">直接告诉研发智能体</label>
+            <textarea
+              id="messageInput"
+              rows="2"
+              maxlength="12000"
+              placeholder="可以告诉研发智能体：想新增的功能、哪里不好用、结果与预期哪里不同，或下一步希望怎么改…"
+              data-i18n-placeholder="composer.placeholder"
+            ></textarea>
+            <div class="composer-actions">
+              <button class="attach-button" id="composerAttachButton" type="button" title="给研发智能体添加附件" data-i18n-title="composer.attach_title">
+                <span aria-hidden="true">＋</span>
+                <span class="sr-only" data-i18n="composer.attach_a11y">给研发智能体添加图片、视频、音频或其他文件</span>
+              </button>
+              <button class="send-button" id="sendButton" type="button" aria-label="发送给研发智能体" data-i18n-aria-label="composer.send" disabled>
+                <svg class="composer-send-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path fill="currentColor" d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z"></path>
+                </svg>
+              </button>
+            </div>
+            <input id="attachmentInput" type="file" multiple hidden />
+          </div>
+          <div class="composer-meta">
+            <span id="replyContext" hidden></span>
+            <span id="sendHint" data-i18n="composer.hint">消息只会发送给研发智能体 · Enter 发送</span>
+          </div>
+        </footer>
+      </main>
+
+      <aside class="panel members-panel" id="membersPanel" aria-label="智能体" data-i18n-aria-label="agents.title">
+        <div class="members-heading">
+          <div>
+            <h2 data-i18n="agents.title">智能体</h2>
+            <span id="memberCount" data-i18n="agents.count_zero">0 个智能体</span>
+          </div>
+          <button class="icon-button mobile-only" type="button" data-close-drawer aria-label="关闭智能体" data-i18n-aria-label="agents.close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <section class="notification-setting" id="notificationSetting" aria-labelledby="notificationTitle">
+          <div class="notification-setting-copy">
+            <strong id="notificationTitle" data-i18n="notification.title">研发智能体新消息通知</strong>
+            <span data-i18n="notification.copy">关闭页面后也可收到研发进展</span>
+          </div>
+          <button
+            class="notification-switch"
+            id="notificationToggle"
+            type="button"
+            role="switch"
+            aria-checked="false"
+            aria-describedby="notificationHelp"
+          >
+            <span class="notification-switch-track" aria-hidden="true"><span></span></span>
+            <span id="notificationState" data-i18n="notification.off">关闭</span>
+          </button>
+          <p class="notification-help" id="notificationHelp" role="status" hidden></p>
+        </section>
+        <div class="member-list" id="memberList">
+          <div class="side-empty" data-i18n="agents.select_app">选择应用后查看智能体</div>
+        </div>
+        <div class="member-list-footer" id="memberListFooter" hidden></div>
+      </aside>
+    </div>
+
+    <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+
+    <dialog class="modal ios-install-guide-modal" id="iosInstallGuideDialog" aria-labelledby="iosInstallGuideTitle">
+      <div class="ios-install-guide-shell">
+        <header class="modal-header ios-install-guide-header">
+          <div>
+            <span class="eyebrow" data-i18n="ios_guide.kicker">iPhone · 只需设置一次</span>
+            <h2 id="iosInstallGuideTitle" data-i18n="ios_guide.title">开启研发消息提醒</h2>
+          </div>
+          <button class="icon-button" id="closeIosInstallGuideButton" type="button" aria-label="关闭开启提醒指引" data-i18n-aria-label="ios_guide.close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="ios-install-guide-body">
+          <p class="ios-install-guide-intro" data-i18n="ios_guide.intro">这是 iPhone 的系统要求，约 10 秒；不会重新登录，也不用重新配对。</p>
+          <ol class="ios-install-guide-steps">
+            <li>
+              <span class="ios-install-guide-number" aria-hidden="true">1</span>
+              <span class="ios-install-guide-step-copy">
+                <strong data-i18n="ios_guide.step_menu_title">点 Safari 右下角“…”</strong>
+                <small data-i18n="ios_guide.step_menu_copy">如果你直接看到了“分享”图标，点它也可以。</small>
+              </span>
+              <span class="ios-install-guide-menu-icon" aria-hidden="true">•••</span>
+            </li>
+            <li>
+              <span class="ios-install-guide-number" aria-hidden="true">2</span>
+              <span class="ios-install-guide-step-copy">
+                <strong data-i18n="ios_guide.step_home_title">点“分享”→“添加到主屏幕”</strong>
+                <small data-i18n="ios_guide.step_home_copy">按右上角“添加”完成。</small>
+              </span>
+            </li>
+            <li>
+              <span class="ios-install-guide-number" aria-hidden="true">3</span>
+              <span class="ios-install-guide-step-copy">
+                <strong data-i18n="ios_guide.step_open_title">从桌面打开 AppLooper</strong>
+                <small data-i18n="ios_guide.step_open_copy">回到这里点“开启研发提醒”，系统会询问是否允许通知。</small>
+              </span>
+            </li>
+          </ol>
+        </div>
+        <div class="modal-actions ios-install-guide-actions">
+          <button class="secondary-button" id="dismissIosInstallGuideButton" type="button" data-i18n="ios_guide.later">暂不开启</button>
+          <button class="primary-button" id="confirmIosInstallGuideButton" type="button" data-i18n="ios_guide.done">知道了</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="modal developer-session-modal" id="developerSessionDialog" aria-labelledby="developerSessionTitle">
+      <div class="developer-session-shell">
+        <header class="modal-header developer-session-header">
+          <div>
+            <span class="eyebrow" data-i18n="session.kicker">研发智能体</span>
+            <h2 id="developerSessionTitle" data-i18n="session.title">实时工作记录</h2>
+            <p id="developerSessionMeta" data-i18n="session.loading">正在读取 Claude Code / Codex 当前会话…</p>
+          </div>
+          <button class="icon-button" id="closeDeveloperSessionButton" type="button" aria-label="关闭实时工作记录" data-i18n-aria-label="session.close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="developer-session-notice">
+          <span data-i18n="session.notice">按原时间顺序显示可见工作记录；隐藏思维链、系统提示和可能含凭证的工具参数不会发送到手机。</span>
+          <span class="developer-session-heartbeat" id="developerSessionHeartbeat"></span>
+        </div>
+        <div class="developer-session-log" id="developerSessionLog" role="log" aria-live="off" aria-busy="true">
+          <div class="developer-session-empty">
+            <span class="progress-spinner" aria-hidden="true"></span>
+            <span data-i18n="session.loading">正在读取 Claude Code / Codex 当前会话…</span>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="modal project-secrets-modal" id="projectSecretsDialog" aria-labelledby="projectSecretsDialogTitle">
+      <form id="projectSecretsForm">
+        <header class="modal-header">
+          <div>
+            <span class="eyebrow" data-i18n="project_secrets.kicker">本机安全配置</span>
+            <h2 id="projectSecretsDialogTitle" data-i18n="project_secrets.title">补全上线所需密钥</h2>
+          </div>
+          <button class="icon-button" id="closeProjectSecretsButton" type="button" aria-label="关闭私密配置" data-i18n-aria-label="project_secrets.close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="project-secrets-body">
+          <p data-i18n="project_secrets.copy">密钥仅保存在这台电脑，并由 Windows 当前账户加密；不会写入聊天、项目源码、运行日志或版本库。</p>
+          <label class="project-secret-field">
+            <span>Agnes API Key</span>
+            <input id="projectAgnesApiKeyInput" type="password" autocomplete="new-password" spellcheck="false" maxlength="8192" data-i18n-placeholder="project_secrets.agnes_placeholder" placeholder="粘贴 Agnes API Key" />
+            <small id="projectAgnesApiKeyStatus" data-i18n="project_secrets.agnes_missing">尚未配置；这是唯一需要你提供的密钥。</small>
+          </label>
+          <div class="project-generated-secrets">
+            <strong data-i18n="project_secrets.generated_title">平台自动生成</strong>
+            <p data-i18n="project_secrets.generated_copy">生产会话密钥和统计访问令牌会在保存时自动生成，无需填写。</p>
+          </div>
+          <p class="repository-error" id="projectSecretsError" role="alert" hidden></p>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" id="cancelProjectSecretsButton" type="button" data-i18n="common.cancel">取消</button>
+          <button class="primary-button" id="saveProjectSecretsButton" type="submit" data-i18n="project_secrets.save">安全保存并继续</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal operations-skill-modal" id="operationsSkillDialog" aria-labelledby="operationsSkillDialogTitle">
+      <form id="operationsSkillForm">
+        <header class="modal-header">
+          <div>
+            <span class="eyebrow" id="operationsSkillKicker">上线 · Skill</span>
+            <h2 id="operationsSkillDialogTitle">配置上线方式</h2>
+          </div>
+          <button class="icon-button" id="closeOperationsSkillButton" type="button" aria-label="Close Skill settings" data-i18n-aria-label="operations.skill_close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+
+        <div class="operations-skill-dialog-body">
+          <p class="operations-skill-dialog-intro" id="operationsSkillDialogIntro">告诉智能体你希望通过哪个平台完成上线；已有配置会优先沿用。</p>
+          <div class="operations-skill-dialog-fields">
+            <div id="operationsSkillNameField">
+              <label>
+                <span data-i18n="operations.skill_name">Skill 名称</span>
+                <input id="operationsSkillNameInput" type="text" autocomplete="off" maxlength="100" />
+              </label>
+            </div>
+
+            <div id="operationsSkillDeploymentFields">
+              <label>
+                <span id="operationsSkillProviderLabel" data-i18n="operations.skill_provider">平台或服务</span>
+                <input id="operationsSkillProviderInput" type="text" autocomplete="off" maxlength="120" placeholder="例如：GitHub Pages、App Store 或自定义平台" data-i18n-placeholder="operations.skill_provider_placeholder" />
+              </label>
+              <label>
+                <span id="operationsSkillTargetLabel" data-i18n="operations.skill_target">目标地址或数据入口（可选）</span>
+                <input id="operationsSkillTargetInput" type="url" inputmode="url" autocomplete="off" maxlength="1000" placeholder="https://…" />
+                <small data-i18n="operations.skill_target_help">不要填写密码或访问令牌；需要授权时智能体会单独说明。</small>
+              </label>
+            </div>
+
+            <div id="operationsSkillExtendedFields" hidden>
+              <div class="operations-skill-toolbar">
+                <div class="operations-skill-mode-toggle" role="tablist" aria-label="Skill configuration mode" data-i18n-aria-label="operations.skill_mode_aria">
+                  <button class="operations-skill-mode-button is-active" id="operationsSkillSimpleModeButton" type="button" data-mode="simple" data-i18n="operations.skill_mode_simple">简要描述</button>
+                  <button class="operations-skill-mode-button" id="operationsSkillAdvancedModeButton" type="button" data-mode="advanced" data-i18n="operations.skill_mode_advanced">精细化配置</button>
+                </div>
+                <button class="secondary-button operations-skill-generate-button" id="generateOperationsSkillButton" type="button" data-i18n="operations.skill_generate">AI 智能生成</button>
+              </div>
+              <p class="operations-skill-generation-notice" id="operationsSkillGenerationNotice" role="status" hidden></p>
+              <details class="operations-skill-advanced-panel" id="operationsSkillAdvancedPanel">
+                <summary data-i18n="operations.skill_advanced_toggle">展开精细化配置项</summary>
+                <div class="operations-skill-items" id="operationsSkillItemsList" aria-live="polite"></div>
+                <button class="text-button operations-skill-add-item" id="operationsSkillAddItemButton" type="button" data-i18n="operations.skill_add_item">添加一项</button>
+              </details>
+            </div>
+
+            <div class="operations-skill-rules-block">
+              <div class="operations-skill-rules-head">
+                <span data-i18n="operations.skill_rules">Skill 说明</span>
+                <button class="secondary-button operations-skill-polish-button" id="polishOperationsSkillButton" type="button" hidden data-i18n="operations.skill_polish">一键润色</button>
+              </div>
+              <textarea id="operationsSkillInstructionsInput" rows="8" maxlength="8000" placeholder="用自然语言描述要如何统计、投放或上线；智能体会按此执行。也可点 AI 智能生成。" data-i18n-placeholder="operations.skill_rules_placeholder"></textarea>
+              <small data-i18n="operations.skill_rules_help">此处既供您阅读，也会直接交给智能体。展开精细化配置项后，保存时会追加到说明末尾。</small>
+              <div class="operations-skill-missing-fields" id="operationsSkillMissingFields" hidden>
+                <strong id="operationsSkillMissingTitle" data-i18n="operations.skill_missing_title">AI 建议补充（可直接改下方 Skill 说明）</strong>
+                <p class="operations-skill-missing-copy" id="operationsSkillMissingCopy" data-i18n="operations.skill_missing_copy">点击下方「一键润色」，AI 会把建议合并成清晰步骤并填入 Skill 说明。</p>
+                <ul id="operationsSkillMissingFieldsList"></ul>
+              </div>
+            </div>
+          </div>
+          <p class="repository-error" id="operationsSkillError" role="alert" hidden></p>
+        </div>
+
+        <div class="modal-actions operations-skill-actions">
+          <button class="text-button operations-skill-reset" id="resetOperationsSkillButton" type="button" data-i18n="operations.skill_reset">恢复默认</button>
+          <button class="secondary-button" id="cancelOperationsSkillButton" type="button" data-i18n="common.cancel">取消</button>
+          <button class="primary-button" id="saveOperationsSkillButton" type="submit" data-i18n="common.save">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal operations-guided-setup-modal" id="operationsGuidedSetupDialog" aria-labelledby="operationsGuidedSetupTitle">
+      <form id="operationsGuidedSetupForm">
+        <header class="modal-header">
+          <div>
+            <span class="eyebrow" id="operationsGuidedSetupKicker" data-i18n="operations.guided_kicker">运营智能体 · 引导补全</span>
+            <h2 id="operationsGuidedSetupTitle" data-i18n="operations.guided_title">补全 Skill 配置</h2>
+            <p class="operations-guided-setup-progress" id="operationsGuidedSetupProgress"></p>
+          </div>
+          <button class="icon-button" id="closeOperationsGuidedSetupButton" type="button" aria-label="关闭引导" data-i18n-aria-label="operations.guided_close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="operations-guided-setup-body">
+          <div class="operations-guided-setup-question-row">
+            <p class="operations-guided-setup-question" id="operationsGuidedSetupQuestion"></p>
+            <button class="secondary-button operations-guided-setup-ai-button" id="operationsGuidedSetupApplyButton" type="button" data-i18n="operations.guided_ai_assist">
+              <span aria-hidden="true">✦</span>
+              <span>AI 辅助判断</span>
+            </button>
+          </div>
+          <p class="operations-guided-setup-reason" id="operationsGuidedSetupReason" hidden></p>
+          <p class="operations-guided-setup-loading" id="operationsGuidedSetupLoading" hidden></p>
+          <div class="operations-guided-setup-options" id="operationsGuidedSetupOptions" role="group"></div>
+          <label class="operations-guided-setup-custom-wrap" id="operationsGuidedSetupCustomWrap" hidden>
+            <span id="operationsGuidedSetupCustomLabel" data-i18n="operations.guided_custom_label">自定义内容</span>
+            <input id="operationsGuidedSetupCustomInput" type="text" autocomplete="off" maxlength="500" />
+          </label>
+          <label class="operations-guided-setup-input-wrap" id="operationsGuidedSetupInputWrap" hidden>
+            <input id="operationsGuidedSetupInput" type="text" autocomplete="off" maxlength="1000" />
+          </label>
+          <p class="repository-error" id="operationsGuidedSetupError" role="alert" hidden></p>
+        </div>
+        <div class="modal-actions operations-guided-setup-actions">
+          <button class="secondary-button" id="operationsGuidedSetupBackButton" type="button" data-i18n="operations.guided_back">上一步</button>
+          <button class="primary-button" id="operationsGuidedSetupNextButton" type="button" data-i18n="operations.guided_next">下一步</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="releaseVerifyVerdictDialog" aria-labelledby="releaseVerifyVerdictTitle">
+      <form id="releaseVerifyVerdictForm" method="dialog">
+        <header class="modal-header">
+          <div>
+            <span class="eyebrow" data-i18n="release.verify_verdict_kicker">上线前审查</span>
+            <h2 id="releaseVerifyVerdictTitle" data-i18n="release.verify_verdict_title">这项功能是否验证通过？</h2>
+          </div>
+          <button class="icon-button" id="closeReleaseVerifyVerdictButton" type="button" aria-label="取消" data-i18n-aria-label="common.cancel">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="modal-body">
+          <p id="releaseVerifyVerdictItem"></p>
+          <label class="release-verify-fail-note" for="releaseVerifyFailNote">
+            <span data-i18n="release.verify_fail_note_label">不通过时可填写意见（可选）</span>
+            <textarea id="releaseVerifyFailNote" rows="3" data-i18n-placeholder="release.verify_fail_note_placeholder" placeholder="可选：简述哪里不符合预期"></textarea>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" id="releaseVerifyFailButton" type="button" data-i18n="release.verify_fail">不通过</button>
+          <button class="primary-button" id="releaseVerifyPassButton" type="button" data-i18n="release.verify_pass">通过</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal operations-source-detail-modal" id="operationsSourceDetailDialog" aria-labelledby="operationsSourceDetailTitle">
+      <form id="operationsSourceDetailForm">
+        <header class="modal-header">
+          <div>
+            <span class="eyebrow" data-i18n="operations.source_detail_kicker">模块生效详情</span>
+            <h2 id="operationsSourceDetailTitle"></h2>
+          </div>
+          <button class="icon-button" id="closeOperationsSourceDetailButton" type="button" aria-label="关闭模块详情" data-i18n-aria-label="operations.source_detail_close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="operations-source-detail-body">
+          <div class="operations-source-detail-state" id="operationsSourceDetailState"></div>
+          <dl class="operations-source-detail-list" id="operationsSourceDetailList"></dl>
+          <section class="operations-source-flow" aria-labelledby="operationsSourceFlowTitle">
+            <strong id="operationsSourceFlowTitle" data-i18n="operations.source_flow_title">详细生效方式</strong>
+            <ol id="operationsSourceFlowSteps"></ol>
+          </section>
+          <p class="operations-source-privacy" id="operationsSourcePrivacy"></p>
+          <p class="repository-error" id="operationsSourceDetailError" role="alert" hidden></p>
+        </div>
+        <div class="modal-actions operations-source-detail-actions">
+          <button class="secondary-button" id="cancelOperationsSourceDetailButton" type="button" data-i18n="operations.source_detail_done">关闭</button>
+          <button class="secondary-button" id="openOperationsSourceAuthorizationButton" type="button" hidden></button>
+          <button class="primary-button" id="authorizeOperationsSourceButton" type="submit"></button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal developer-session-modal" id="operationsAgentDialog" aria-labelledby="operationsAgentDialogTitle">
+      <div class="developer-session-shell">
+        <header class="modal-header developer-session-header">
+          <div>
+            <span class="eyebrow" data-i18n="operations.agent_label">运营智能体</span>
+            <h2 id="operationsAgentDialogTitle" data-i18n="operations.agent_status_title">实时运行状态</h2>
+            <p id="operationsAgentDialogMeta" data-i18n="operations.agent_idle">等待应用达到上线条件</p>
+          </div>
+          <button class="icon-button" id="closeOperationsAgentButton" type="button" aria-label="关闭运营智能体状态" data-i18n-aria-label="operations.agent_status_close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="developer-session-notice" data-i18n="operations.agent_status_notice">这里显示运营智能体的任务、数据来源和最近刷新结果；没有来源的数据不会显示成真实指标。</div>
+        <div class="developer-session-log operations-agent-log" id="operationsAgentLog" role="log" aria-live="off">
+          <div class="developer-session-empty" id="operationsAgentLogEmpty">
+            <span data-i18n="operations.agent_no_activity">还没有运营任务</span>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="modal create-modal" id="createDialog" aria-labelledby="createDialogTitle">
+      <form id="createForm" method="dialog">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow" data-i18n="create.kicker">新工作流</span>
+            <h2 id="createDialogTitle" data-i18n="create.title">创建一个应用</h2>
+          </div>
+          <button class="icon-button" id="closeCreateButton" type="button" aria-label="Close app setup" data-i18n-aria-label="create.close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+
+        <div class="form-fields">
+          <label>
+            <span data-i18n="create.audience">面向谁</span>
+            <input id="audienceInput" name="audience" autocomplete="off" placeholder="例如：小学英语老师" data-i18n-placeholder="create.audience_placeholder" required maxlength="300" />
+          </label>
+          <label>
+            <span data-i18n="create.type">应用类型</span>
+            <input id="appTypeInput" name="app_type" autocomplete="off" placeholder="例如：备课网页工具" data-i18n-placeholder="create.type_placeholder" required maxlength="200" />
+          </label>
+          <label>
+            <span data-i18n="create.needs">需要解决什么</span>
+            <textarea id="needsInput" name="needs" rows="4" placeholder="例如：快速生成可编辑的分层练习，并导出打印版" data-i18n-placeholder="create.needs_placeholder" required maxlength="8000"></textarea>
+          </label>
+          <fieldset class="coding-agent-field">
+            <legend data-i18n="create.coding_agent">本地 Coding 软件</legend>
+            <div class="coding-agent-segments" id="codingAgentOptions" aria-describedby="codingAgentHelp codingAgentError">
+              <label class="coding-agent-option" id="codexAgentOption">
+                <input id="codexAgentInput" type="radio" name="coding_agent" value="codex" disabled />
+                <span class="coding-agent-content">
+                  <strong>Codex</strong>
+                  <small id="codexAgentStatus" data-i18n="coding.checking">正在检测</small>
+                </span>
+              </label>
+              <label class="coding-agent-option" id="claudeAgentOption">
+                <input id="claudeAgentInput" type="radio" name="coding_agent" value="claude" disabled />
+                <span class="coding-agent-content">
+                  <strong>Claude Code</strong>
+                  <small id="claudeAgentStatus" data-i18n="coding.checking">正在检测</small>
+                </span>
+              </label>
+            </div>
+            <small class="field-help" id="codingAgentHelp" data-i18n="create.coding_help">状态来自这台电脑的命令行检测结果。</small>
+            <small class="field-error" id="codingAgentError" role="alert" hidden></small>
+          </fieldset>
+          <div class="workspace-field">
+            <span id="workspaceLabel" data-i18n="create.workspace">Workspace（电脑路径）</span>
+            <div class="workspace-input-row">
+              <input
+                id="workspaceInput"
+                name="workspace"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="例如：C:\Users\你的名字\Documents\现有项目"
+                data-i18n-placeholder="create.workspace_placeholder"
+                required
+                maxlength="1000"
+                aria-labelledby="workspaceLabel"
+                aria-describedby="workspaceHelp workspaceError"
+              />
+              <button class="secondary-button workspace-browse-button" id="browseWorkspaceButton" type="button" data-i18n="create.workspace_browse">选择文件夹</button>
+            </div>
+            <small id="workspaceHelp" data-i18n="create.workspace_help">直接读取并继续修改此目录已有文件，不会创建额外子目录。</small>
+            <small class="field-error" id="workspaceError" role="alert" hidden></small>
+          </div>
+          <fieldset class="create-materials-field">
+            <legend data-i18n="create.materials">详细资料（可选）</legend>
+            <input id="createMaterialsInput" type="file" multiple hidden />
+            <div class="create-materials-actions">
+              <button class="secondary-button" id="addCreateMaterialsButton" type="button" data-i18n="create.materials_add">选择文件</button>
+              <small id="createMaterialsHelp" data-i18n="create.materials_help">支持一次选择多个不同格式的文件；资料会原样交给 Coding 软件。</small>
+            </div>
+            <div class="create-materials-list" id="createMaterialsList" aria-live="polite" hidden></div>
+            <small class="field-error" id="createMaterialsError" role="alert" hidden></small>
+          </fieldset>
+        </div>
+
+        <p class="form-warning" id="createSystemWarning" role="alert" hidden data-i18n="coding.none_dialog_warning">
+          未检测到可用的本地 Coding 软件，请先安装 Codex 或 Claude Code 并刷新页面。
+        </p>
+
+        <div class="intent-preview" aria-live="polite">
+          <span data-i18n="create.intent_label">提交给工作流的需求</span>
+          <p id="intentPreview" data-i18n="create.intent_default">我要开发一个面向目标用户的合适应用，需要满足他们的核心需求</p>
+        </div>
+
+        <div class="modal-actions">
+          <button class="secondary-button" id="cancelCreateButton" type="button" data-i18n="common.cancel">取消</button>
+          <button class="primary-button" id="createSubmitButton" type="submit" aria-describedby="createSystemWarning" data-i18n="create.submit">开始创建</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="workspaceEditDialog" aria-labelledby="workspaceEditDialogTitle">
+      <form id="workspaceEditForm">
+        <header class="modal-header">
+          <div>
+            <span class="eyebrow" data-i18n="workspace.edit_kicker">项目目录</span>
+            <h2 id="workspaceEditDialogTitle" data-i18n="workspace.edit_title">修改 Workspace</h2>
+          </div>
+          <button class="icon-button" id="closeWorkspaceEditButton" type="button" aria-label="关闭" data-i18n-aria-label="common.close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="workspace-dialog-body">
+          <div class="workspace-field">
+            <span id="workspaceEditLabel" data-i18n="create.workspace">Workspace（电脑路径）</span>
+            <div class="workspace-input-row">
+              <input
+                id="workspaceEditInput"
+                name="workspace"
+                type="text"
+                spellcheck="false"
+                autocomplete="off"
+                maxlength="512"
+                data-i18n-placeholder="create.workspace_placeholder"
+                placeholder="例如：C:\Users\你的名字\Documents\现有项目"
+                aria-labelledby="workspaceEditLabel"
+                aria-describedby="workspaceEditHelp workspaceEditError"
+                required
+              />
+              <button class="secondary-button workspace-browse-button" id="browseWorkspaceEditButton" type="button" data-i18n="create.workspace_browse">选择文件夹</button>
+            </div>
+            <small id="workspaceEditHelp" data-i18n="workspace.edit_help">修改后，研发智能体与运营扫描都会指向新的项目文件夹。</small>
+            <small class="field-error" id="workspaceEditError" role="alert" hidden></small>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" id="cancelWorkspaceEditButton" type="button" data-i18n="common.cancel">取消</button>
+          <button class="primary-button" id="saveWorkspaceEditButton" type="submit" data-i18n="workspace.save">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="codingAgentDialog" aria-labelledby="codingAgentDialogTitle">
+      <form id="codingAgentForm">
+        <header class="modal-header">
+          <div>
+            <span class="eyebrow" data-i18n="coding_agent.edit_kicker">Coding CLI</span>
+            <h2 id="codingAgentDialogTitle" data-i18n="coding_agent.edit_title">高级参数</h2>
+          </div>
+          <button class="icon-button" id="closeCodingAgentButton" type="button" aria-label="关闭" data-i18n-aria-label="common.close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="coding-agent-dialog-body">
+          <p class="modal-help" id="codingAgentDialogIntro" data-i18n="coding_agent.edit_intro">每行一个参数，会追加到 AppLooper 调用的当前 Coding Agent 命令。留空表示不额外传参。</p>
+          <div class="workspace-field coding-cli-field" id="claudeCliArgsField">
+            <label for="claudeCliArgsInput" data-i18n="coding_agent.claude_label">Claude Code 额外参数</label>
+            <textarea
+              id="claudeCliArgsInput"
+              name="claude_cli_args"
+              rows="4"
+              spellcheck="false"
+              data-i18n-placeholder="coding_agent.claude_placeholder"
+              placeholder="例如：&#10;--max-budget-usd 20&#10;--max-turns 12"
+            ></textarea>
+          </div>
+          <div class="workspace-field coding-cli-field" id="codexCliArgsField">
+            <label for="codexCliArgsInput" data-i18n="coding_agent.codex_label">Codex 额外参数</label>
+            <textarea
+              id="codexCliArgsInput"
+              name="codex_cli_args"
+              rows="4"
+              spellcheck="false"
+              data-i18n-placeholder="coding_agent.codex_placeholder"
+              placeholder="例如：&#10;--profile project"
+            ></textarea>
+          </div>
+          <small class="field-error" id="codingAgentSettingsError" role="alert" hidden></small>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" id="cancelCodingAgentButton" type="button" data-i18n="common.cancel">取消</button>
+          <button class="primary-button" id="saveCodingAgentButton" type="submit" data-i18n="coding_agent.save">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal workspace-browser-modal" id="workspaceBrowserDialog" aria-labelledby="workspaceBrowserDialogTitle">
+      <div class="workspace-browser-shell">
+        <header class="modal-header">
+          <div>
+            <span class="eyebrow" data-i18n="workspace_browser.kicker">远端电脑</span>
+            <h2 id="workspaceBrowserDialogTitle" data-i18n="workspace_browser.title">选择工作区文件夹</h2>
+          </div>
+          <button class="icon-button" id="closeWorkspaceBrowserButton" type="button" aria-label="关闭" data-i18n-aria-label="workspace_browser.close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <div class="workspace-browser-body">
+          <div class="workspace-browser-path-row">
+            <button class="icon-button workspace-browser-up" id="workspaceBrowserUpButton" type="button" aria-label="返回上一级" data-i18n-aria-label="workspace_browser.up">←</button>
+            <div class="workspace-browser-current" id="workspaceBrowserCurrentPath" role="status"></div>
+          </div>
+          <div class="workspace-browser-roots" id="workspaceBrowserRoots" hidden></div>
+          <div class="workspace-browser-loading" id="workspaceBrowserLoading" role="status" hidden data-i18n="workspace_browser.loading">正在读取电脑文件夹…</div>
+          <div class="workspace-browser-error" id="workspaceBrowserError" role="alert" hidden></div>
+          <div class="workspace-browser-list" id="workspaceBrowserList" role="list"></div>
+          <div class="workspace-browser-empty" id="workspaceBrowserEmpty" hidden data-i18n="workspace_browser.empty">这个文件夹中没有子文件夹</div>
+          <div class="workspace-new-folder" id="workspaceNewFolder" hidden>
+            <label for="workspaceNewFolderInput" data-i18n="workspace_browser.new_folder_label">新文件夹名称</label>
+            <div class="workspace-new-folder-row">
+              <input id="workspaceNewFolderInput" autocomplete="off" maxlength="180" data-i18n-placeholder="workspace_browser.new_folder_placeholder" placeholder="例如：我的新应用" />
+              <button class="primary-button" id="confirmWorkspaceNewFolderButton" type="button" data-i18n="workspace_browser.create">创建</button>
+              <button class="secondary-button" id="cancelWorkspaceNewFolderButton" type="button" data-i18n="common.cancel">取消</button>
+            </div>
+            <small class="field-error" id="workspaceNewFolderError" role="alert" hidden></small>
+          </div>
+        </div>
+        <footer class="modal-actions workspace-browser-actions">
+          <button class="secondary-button" id="showWorkspaceNewFolderButton" type="button" data-i18n="workspace_browser.new_folder">新建文件夹</button>
+          <button class="primary-button" id="chooseWorkspaceFolderButton" type="button" data-i18n="workspace_browser.choose">选择此文件夹</button>
+        </footer>
+      </div>
+    </dialog>
+
+    <dialog class="modal release-final-confirm-modal" id="releaseFinalConfirmDialog" aria-labelledby="releaseFinalConfirmTitle">
+      <div class="release-final-confirm-card">
+        <h2 id="releaseFinalConfirmTitle" data-i18n="release.final_confirm_title">确认最终判定</h2>
+        <p id="releaseFinalConfirmCopy" data-i18n="release.final_confirm_copy">您确认选择下面这项吗？确认后无法修改。</p>
+        <p class="release-final-confirm-choice" id="releaseFinalConfirmChoice"></p>
+        <div class="release-final-confirm-timer" role="status">
+          <span id="releaseFinalConfirmCountNum">5</span>
+          <small id="releaseFinalConfirmCountdown"></small>
+        </div>
+        <div class="release-final-confirm-actions">
+          <button class="secondary-button" id="releaseFinalThinkButton" type="button" data-i18n="release.final_confirm_think">我再想想</button>
+          <button class="primary-button" id="releaseFinalConfirmButton" type="button" disabled data-i18n="release.final_confirm_ok">确认</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="modal pairing-modal" id="pairingDialog" aria-labelledby="pairingDialogTitle">
+      <div class="modal-header">
+        <div>
+          <span class="eyebrow" data-i18n="pairing.kicker">手机远程使用</span>
+          <h2 id="pairingDialogTitle" data-i18n="pairing.title">连接一台手机</h2>
+        </div>
+        <button class="icon-button" id="closePairingButton" type="button" aria-label="Close phone connection" data-i18n-aria-label="pairing.close">
+          <span aria-hidden="true">×</span>
+        </button>
+      </div>
+
+      <div class="pairing-body">
+        <p class="pairing-intro" data-i18n="pairing.intro">手机无需安装 Tailscale。用 Safari 打开下面的 HTTPS 地址，建议先添加到主屏幕，再从桌面图标打开并输入配对码。</p>
+
+        <div class="pairing-url-block">
+          <label for="pairingUrl" data-i18n="pairing.url_label">手机访问地址</label>
+          <div class="pairing-copy-row">
+            <input id="pairingUrl" type="url" readonly aria-describedby="pairingUrlHelp" />
+            <button class="secondary-button compact" id="copyPairingUrlButton" type="button" data-i18n="pairing.copy_url">复制地址</button>
+          </div>
+          <small id="pairingUrlHelp" data-i18n="pairing.url_help">这是这台电脑提供的公网 HTTPS 地址。</small>
+        </div>
+
+        <section class="network-diagnostic" id="networkDiagnostic" aria-live="polite">
+          <div>
+            <strong data-i18n="network.title">手机连接检查</strong>
+            <p id="networkDiagnosticText" data-i18n="network.idle">如果手机打不开地址，可先在这台电脑上检查。</p>
+          </div>
+          <div class="network-diagnostic-actions">
+            <button class="secondary-button compact" id="checkNetworkButton" type="button" data-i18n="network.check">检查连接</button>
+            <button class="primary-button compact" id="repairNetworkButton" type="button" hidden data-i18n="network.repair">修复连接</button>
+            <button class="text-button" id="restoreNetworkButton" type="button" hidden data-i18n="network.restore">恢复原设置</button>
+          </div>
+        </section>
+
+        <div class="pairing-connect-grid">
+          <div class="pairing-code-card">
+            <span class="pairing-label" data-i18n="access.code_label">6 位配对码</span>
+            <output class="pairing-code" id="pairingCode" aria-live="polite">··· ···</output>
+            <span class="pairing-countdown" id="pairingCountdown" role="status" data-i18n="pairing.generating">正在生成配对码…</span>
+            <div class="pairing-code-actions">
+              <button class="text-button" id="copyPairingCodeButton" type="button" disabled data-i18n="pairing.copy_code">复制配对码</button>
+              <button class="text-button" id="refreshPairingButton" type="button" data-i18n="pairing.refresh_code">刷新配对码</button>
+            </div>
+          </div>
+
+          <figure class="pairing-qr" id="pairingQr" hidden>
+            <img id="pairingQrImage" alt="用手机扫描打开工作台" data-i18n-alt="pairing.qr_alt" />
+            <figcaption data-i18n="pairing.qr_caption">手机扫码打开</figcaption>
+          </figure>
+        </div>
+
+        <p class="pairing-session-note"><strong data-i18n="pairing.session_strong">这台手机配对后将保持登录 90 天。</strong><span data-i18n="pairing.session_copy">清除浏览器数据、主动撤销或会话到期后才需重新配对。</span></p>
+        <p class="pairing-error" id="pairingError" role="alert" hidden></p>
+      </div>
+
+      <div class="modal-actions pairing-actions">
+        <button class="danger-text-button" id="revokeSessionsButton" type="button" data-i18n="pairing.revoke">撤销全部手机会话</button>
+        <button class="secondary-button" id="closePairingFooterButton" type="button" data-i18n="common.done">完成</button>
+      </div>
+    </dialog>
+
+    <dialog class="modal persona-modal" id="personaDialog" aria-labelledby="personaDialogTitle">
+      <div class="modal-header persona-header">
+        <div class="persona-heading-content">
+          <span class="large-avatar" id="personaAvatar" aria-hidden="true">体</span>
+          <div>
+            <span class="eyebrow" id="personaKind">虚拟用户智能体组</span>
+            <h2 id="personaDialogTitle" data-i18n="agents.profile">智能体资料</h2>
+            <p id="personaSubtitle"></p>
+          </div>
+        </div>
+        <button class="icon-button" id="closePersonaButton" type="button" aria-label="关闭智能体资料" data-i18n-aria-label="agents.close_profile">
+          <span aria-hidden="true">×</span>
+        </button>
+      </div>
+      <form class="persona-details persona-edit-form" id="personaEditForm" hidden>
+        <label class="persona-field"><span data-i18n="profile.name">姓名</span><input id="personaFieldName" name="name" required /></label>
+        <label class="persona-field"><span data-i18n="profile.age">年龄</span><input id="personaFieldAge" name="age" required /></label>
+        <label class="persona-field"><span data-i18n="profile.gender">性别</span><input id="personaFieldGender" name="gender" required /></label>
+        <label class="persona-field"><span data-i18n="profile.location">地区</span><input id="personaFieldLocation" name="location" required /></label>
+        <label class="persona-field"><span data-i18n="profile.identity">身份</span><input id="personaFieldRole" name="role" required /></label>
+        <label class="persona-field"><span data-i18n="profile.tech_level">技术水平</span><input id="personaFieldTechLevel" name="tech_level" required /></label>
+        <label class="persona-field"><span data-i18n="profile.device">常用设备</span><input id="personaFieldDevice" name="device" required /></label>
+        <label class="persona-field is-wide"><span data-i18n="persona.segments">覆盖细分群体</span><input id="personaFieldSegments" name="covered_segments" placeholder="学生, 职场新人" data-i18n-placeholder="persona.segments_placeholder" required /></label>
+        <label class="persona-field is-wide"><span data-i18n="profile.motivation">动机</span><textarea id="personaFieldMotivation" name="motivation" rows="2" required></textarea></label>
+        <label class="persona-field is-wide"><span data-i18n="profile.constraints">限制</span><textarea id="personaFieldConstraints" name="constraints" rows="2" required></textarea></label>
+        <label class="persona-field is-wide"><span data-i18n="profile.scenario">场景</span><textarea id="personaFieldScenario" name="scenario" rows="2" required></textarea></label>
+        <label class="persona-field is-wide"><span data-i18n="profile.habits">习惯</span><textarea id="personaFieldHabits" name="habits" rows="2" required></textarea></label>
+        <label class="persona-field is-wide"><span data-i18n="persona.task_script">试用步骤（每行一步）</span><textarea id="personaFieldTaskScript" name="task_script" rows="4" required></textarea></label>
+        <label class="persona-field"><span data-i18n="persona.test_account">测试账号</span><input id="personaFieldTestAccount" name="test_account" autocomplete="off" placeholder="zhaoqiming" data-i18n-placeholder="persona.test_account_placeholder" /></label>
+        <label class="persona-field is-wide"><span data-i18n="persona.auth_notes">登录说明</span><textarea id="personaFieldAuthNotes" name="auth_notes" rows="2" placeholder="使用测试账号登录，不要使用真实手机号" data-i18n-placeholder="persona.auth_notes_placeholder"></textarea></label>
+      </form>
+      <div class="persona-details" id="personaDetails"></div>
+      <footer class="persona-dialog-actions" id="personaDialogActions">
+        <button class="secondary-button" id="personaEditButton" type="button" data-i18n="persona.edit">编辑资料</button>
+        <button class="danger-text-button" id="personaDeleteButton" type="button" data-i18n="persona.delete">删除虚拟用户</button>
+        <button class="primary-button" id="personaSaveButton" type="button" hidden data-i18n="persona.save">保存</button>
+        <button class="secondary-button" id="personaCancelEditButton" type="button" hidden data-i18n="common.cancel">取消</button>
+      </footer>
+    </dialog>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+
+    <template id="appEmptyTemplate">
+      <div class="side-empty app-empty">
+        <strong data-i18n="apps.empty_title">还没有应用</strong>
+        <span data-i18n="apps.empty_copy">从一个清晰的目标开始</span>
+      </div>
+    </template>
+
+    <script src="./i18n.js?v=193" defer></script>
+    <script src="./boot.js?v=193" defer></script>
+    <script id="appBundle" src="./app.js?v=199" defer></script>
+  </body>
+</html>
