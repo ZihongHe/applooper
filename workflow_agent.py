@@ -83,6 +83,7 @@ TASK_VERIFICATION_MODES = {"candidate", "external_non_blocking", "retired"}
 EXPERIENCE_VERIFICATION_STATUSES = {"verified", "failed", "blocked", "unverified"}
 EXPERIENCE_TRIAGE_TYPES = {"product_issue", "verification_gap", "environment_blocker"}
 INTERNAL_TEST_COHORT_SIZE = 2
+TREATMENT_INTERNAL_TEST_COHORT_SIZE = 8
 STUDY_EVALUATION_PROTOCOL_VERSION = "blind-standardized-release-v1"
 STUDY_EVALUATOR_PROMPT_ID = "blind-artifact-regression-cuj-v1"
 STUDY_EVALUATOR_DEFAULT_MODEL = "agnes-2.5-flash"
@@ -1206,8 +1207,21 @@ def is_agnes_qualification_state(state: dict[str, Any]) -> bool:
         and (
             "Agnes资格测试-" in intent
             or "/.applooper-trials/" in workspace
+            or "/applooper-trials/" in workspace
         )
     )
+
+
+def should_expand_study_persona_cohort(state: dict[str, Any]) -> bool:
+    """Expand fictional virtual users for study treatment and trial workspaces."""
+
+    if is_agnes_qualification_state(state):
+        return True
+    condition = str(state.get("study_condition") or "").strip()
+    if condition and condition != STUDY_BASELINE_CONDITION:
+        return True
+    workspace = str(state.get("workspace") or "").replace("\\", "/")
+    return "/applooper-trials/" in workspace or "/.applooper-trials/" in workspace
 
 
 def qualification_planning_tools(state: dict[str, Any]) -> list[str] | None:
@@ -2590,7 +2604,7 @@ def requested_experience_surfaces(state: dict[str, Any]) -> set[str]:
 
 
 def paired_study_default_web_views_enabled(state: dict[str, Any]) -> bool:
-    """Whether this workflow should expose both desktop and mobile Web views."""
+    """Whether desktop and mobile Web views are always available."""
 
     return True
 
@@ -2598,7 +2612,7 @@ def paired_study_default_web_views_enabled(state: dict[str, Any]) -> bool:
 def ensure_paired_study_default_web_views(
     state: dict[str, Any], twin: dict[str, Any]
 ) -> dict[str, Any]:
-    """Keep desktop and mobile Web views available without dropping existing state."""
+    """Backfill the paired study's two default Web views without losing state."""
 
     if not paired_study_default_web_views_enabled(state):
         return twin
@@ -3858,6 +3872,12 @@ _EXPERIENCE_PROCESS_RE = re.compile(
     r"(?:分析|推理|置信度|内部|会话|思考过程|决策过程|工具(?:调用|记录)|分类(?:过程|结果|为)|判断为|"
     r"\b(?:session|schema|confidence|reasoning|analysis|analy[sz]\w*|classification|classif\w*|"
     r"decision|decid\w*|chain[\s_-]*of[\s_-]*thought|tool[\s_-]*(?:call|use))\b)",
+    re.I,
+)
+_EXPERIENCE_DEVELOPER_VOICE_RE = re.compile(
+    r"localStorage|sessionStorage|indexedDB|认证体系|账号系统|用户认证|跨设备同步|"
+    r"产品成熟度|个性化推荐|匿名用户|架构|数据存储|单人使用场景|"
+    r"\bAPI\b|\bUI\b|认证相关|登录/注册入口|引导用户创建账号",
     re.I,
 )
 _CONFIRMATION_REQUEST_RE = re.compile(
@@ -8110,7 +8130,8 @@ def migrate_state(state: dict[str, Any]) -> None:
     expanded_study_personas = materialize_study_persona_cohort(state)
     if expanded_study_personas != state.get("personas"):
         state["personas"] = expanded_study_personas
-        state["study_persona_cohort_version"] = STUDY_PERSONA_COHORT_VERSION
+        if study_persona_cohort_is_current(state, expanded_study_personas):
+            state["study_persona_cohort_version"] = STUDY_PERSONA_COHORT_VERSION
         changed = True
     if not isinstance(state.get("feedback_clusters"), dict):
         state["feedback_clusters"] = {
@@ -12079,6 +12100,32 @@ def experience_persona_script(
     return script
 
 
+def experience_follow_up_script(previous_results: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Keep later virtual-user turns on the issues that person already raised."""
+
+    titles: list[str] = []
+    for row in previous_results:
+        if not isinstance(row, dict):
+            continue
+        for issue in row.get("issues") or []:
+            if not isinstance(issue, dict):
+                continue
+            title = public_observation_field(issue.get("title")) or public_field(issue.get("title"))
+            title = re.sub(r"\s+", " ", str(title or "")).strip()
+            if not title or _EXPERIENCE_DEVELOPER_VOICE_RE.search(title):
+                continue
+            if title not in titles:
+                titles.append(title[:40])
+            if len(titles) >= 3:
+                break
+        if len(titles) >= 3:
+            break
+    return [
+        {"id": f"follow-up-{index}", "action": f"再试一次：{title}"}
+        for index, title in enumerate(titles, 1)
+    ]
+
+
 def form_validation_issues_in_result(result: dict[str, Any]) -> list[str]:
     issues: list[str] = []
     for raw in result.get("issues") or []:
@@ -12532,7 +12579,62 @@ def finalize_persona(raw: dict[str, Any], *, index: int = 0) -> dict[str, Any]:
     return persona
 
 
-STUDY_PERSONA_COHORT_VERSION = 3
+STUDY_PERSONA_COHORT_VERSION = 5
+STUDY_PERSONA_COHORT_MIN = 4
+STUDY_PERSONA_COHORT_MAX = 8
+STUDY_I18N_TEXT_SCHEMA = obj({"zh-CN": STR, "en": STR}, ["zh-CN", "en"])
+STUDY_GENERATED_PERSONA_SCHEMA = obj(
+    {
+        "id": STR,
+        "name": STUDY_I18N_TEXT_SCHEMA,
+        "age": STUDY_I18N_TEXT_SCHEMA,
+        "gender": STUDY_I18N_TEXT_SCHEMA,
+        "location": STUDY_I18N_TEXT_SCHEMA,
+        "role": STUDY_I18N_TEXT_SCHEMA,
+        "tech_level": STUDY_I18N_TEXT_SCHEMA,
+        "device": STUDY_I18N_TEXT_SCHEMA,
+        "motivation": STUDY_I18N_TEXT_SCHEMA,
+        "constraints": STUDY_I18N_TEXT_SCHEMA,
+        "scenario": STUDY_I18N_TEXT_SCHEMA,
+        "habits": STUDY_I18N_TEXT_SCHEMA,
+        "group": STUDY_I18N_TEXT_SCHEMA,
+        "covered_segments": STRS,
+        "task_script": {
+            "type": "array",
+            "items": PERSONA_STEP_SCHEMA,
+            "minItems": 2,
+            "maxItems": 6,
+        },
+    },
+    [
+        "id",
+        "name",
+        "age",
+        "gender",
+        "location",
+        "role",
+        "tech_level",
+        "device",
+        "motivation",
+        "constraints",
+        "scenario",
+        "habits",
+        "group",
+        "covered_segments",
+        "task_script",
+    ],
+)
+STUDY_PERSONA_COHORT_SCHEMA = obj(
+    {
+        "personas": {
+            "type": "array",
+            "items": STUDY_GENERATED_PERSONA_SCHEMA,
+            "minItems": STUDY_PERSONA_COHORT_MIN,
+            "maxItems": STUDY_PERSONA_COHORT_MAX,
+        }
+    },
+    ["personas"],
+)
 
 
 def study_audience_text(state: dict[str, Any]) -> str:
@@ -12556,284 +12658,238 @@ def study_audience_text(state: dict[str, Any]) -> str:
     return ""
 
 
-def _study_audience_segments(*texts: str) -> list[str]:
-    text = " ".join(str(item or "") for item in texts if str(item or "").strip())
-    folded = text.casefold()
-    segments: list[str] = []
-    rules = (
-        ("student", r"学生|大学生|高中|同学|campus|student|university|college"),
-        ("office", r"办公|职员|上班|办公室|白领|office|worker|employee"),
-        ("teacher", r"教师|老师|导师|teacher|professor"),
-        ("parent", r"家长|父母|parent"),
-        ("elder", r"老人|老年|长辈|elder|senior"),
-        ("child", r"儿童|小孩|孩子|child|kid"),
-        ("health", r"患者|病人|康复|patient|health"),
+def _study_web_app_record(state: dict[str, Any]) -> dict[str, Any]:
+    run_id = str(state.get("run_id") or "")
+    if not run_id:
+        return {}
+    try:
+        path = run_dir(run_id) / "web_app.json"
+        if not path.is_file():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError, WorkflowError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def study_owner_app_brief(state: dict[str, Any]) -> dict[str, str]:
+    """Collect the owner's app type, audience, and description for VU generation."""
+
+    record = _study_web_app_record(state)
+    intent = str(state.get("intent") or record.get("intent") or "").strip()
+    audience = str(
+        state.get("audience")
+        or record.get("audience")
+        or state.get("target_user")
+        or record.get("target_user")
+        or ""
+    ).strip()
+    app_type = str(state.get("app_type") or record.get("app_type") or "").strip()
+    needs = str(state.get("needs") or record.get("needs") or "").strip()
+    parsed = re.search(
+        r"面向(?P<audience>.+?)的(?P<app_type>.+?)应用，需要(?P<needs>.+)",
+        intent,
     )
-    for name, pattern in rules:
-        if re.search(pattern, text, flags=re.I) or re.search(pattern, folded):
-            segments.append(name)
-    if not segments:
-        segments.append("office")
-    return segments
+    if parsed:
+        audience = audience or parsed.group("audience").strip()
+        app_type = app_type or parsed.group("app_type").strip()
+        needs = needs or parsed.group("needs").strip()
+    parsed_en = re.search(
+        r"build a (?P<app_type>.+?) application for (?P<audience>.+?)\.\s*It needs to (?P<needs>.+)",
+        intent,
+        flags=re.I,
+    )
+    if parsed_en:
+        audience = audience or parsed_en.group("audience").strip()
+        app_type = app_type or parsed_en.group("app_type").strip()
+        needs = needs or parsed_en.group("needs").strip()
+    if not audience:
+        audience = study_audience_text(state)
+    brief = {
+        "app_type": lifecycle_safe_text(app_type, limit=200),
+        "audience": lifecycle_safe_text(audience, limit=300),
+        "needs": lifecycle_safe_text(needs, limit=4_000),
+        "intent": lifecycle_safe_text(intent, limit=4_000),
+        "goal": lifecycle_safe_text(state.get("goal"), limit=1_000),
+        "plan_summary": lifecycle_safe_text(state.get("plan_summary"), limit=2_000),
+    }
+    for key in ("audience", "app_type", "needs"):
+        if brief[key] and not str(state.get(key) or "").strip():
+            state[key] = brief[key]
+    return brief
+
+
+def study_persona_cohort_is_current(
+    state: dict[str, Any],
+    personas: list[dict[str, Any]] | None = None,
+) -> bool:
+    rows = [
+        item
+        for item in (personas if personas is not None else state.get("personas") or [])
+        if isinstance(item, dict)
+    ]
+    if not (STUDY_PERSONA_COHORT_MIN <= len(rows) <= STUDY_PERSONA_COHORT_MAX):
+        return False
+    try:
+        current_version = int(state.get("study_persona_cohort_version") or 0)
+    except (TypeError, ValueError):
+        current_version = 0
+    if current_version < STUDY_PERSONA_COHORT_VERSION:
+        return False
+    for item in rows:
+        if str(item.get("study_profile_source") or "") != "llm":
+            return False
+        try:
+            profile_version = int(item.get("study_profile_version") or 0)
+        except (TypeError, ValueError):
+            return False
+        if profile_version < STUDY_PERSONA_COHORT_VERSION:
+            return False
+    return True
+
+
+def _study_i18n_pair(value: Any, fallback: str = "") -> dict[str, str]:
+    if app_i18n.is_pair(value):
+        return app_i18n.pair(
+            app_i18n.resolve(value, app_i18n.ZH, fallback),
+            app_i18n.resolve(value, app_i18n.EN, fallback),
+        )
+    text = lifecycle_safe_text(value, limit=240) or fallback
+    return app_i18n.pair(text, text)
+
+
+def generate_study_persona_cohort(
+    state: dict[str, Any],
+    source: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Ask the LLM for 4-8 fictional users grounded only in the owner's app brief."""
+
+    brief = study_owner_app_brief(state)
+    locale = prompt_ui_locale(state)
+    planned = source[0] if source else {}
+    payload = {
+        "task": (
+            "Invent 4 to 8 fictional end users for this specific app. "
+            "Ground every person in the owner's app_type, audience, and description only. "
+            "If audience text conflicts with the app type or description, follow the app type and description. "
+            "Do not reuse any preset office, student, water-tracker, or other catalog template. "
+            "Do not copy the participant's real identity or invent the participant's demographics. "
+            "Each person must be a distinct everyday user of THIS app, with a unique name, role, "
+            "scenario, motivation, constraints, habits, and a short task_script of concrete UI actions. "
+            "Write bilingual zh-CN/en fields. English values must contain no Chinese characters. "
+            "task_script actions must be ordinary user actions on this app, not architecture or developer work."
+        ),
+        "owner_brief": brief,
+        "ui_locale": locale,
+        "planned_persona": {
+            "id": planned.get("id") or "p01",
+            "covered_segments": planned.get("covered_segments") or [],
+        },
+        "count_min": STUDY_PERSONA_COHORT_MIN,
+        "count_max": STUDY_PERSONA_COHORT_MAX,
+    }
+    result = call_claude(
+        state,
+        "study_persona_cohort",
+        prompt_json("Generate virtual users from the owner app description", payload),
+        STUDY_PERSONA_COHORT_SCHEMA,
+        allowed_tools=["StructuredOutput"],
+    )
+    generated = [
+        item for item in (result.get("personas") or []) if isinstance(item, dict)
+    ]
+    if not (STUDY_PERSONA_COHORT_MIN <= len(generated) <= STUDY_PERSONA_COHORT_MAX):
+        raise WorkflowError("study persona cohort must contain 4 to 8 generated users")
+    localized_fields = (
+        "name",
+        "age",
+        "gender",
+        "location",
+        "role",
+        "tech_level",
+        "device",
+        "motivation",
+        "constraints",
+        "scenario",
+        "habits",
+    )
+    base_id = re.sub(
+        r"[^a-zA-Z0-9_-]",
+        "-",
+        str((source[0] if source else {}).get("id") or generated[0].get("id") or "study-user"),
+    )[:28] or "study-user"
+    segments = [
+        lifecycle_safe_text(item, limit=80)
+        for item in ((source[0] if source else {}).get("covered_segments") or [])
+        if lifecycle_safe_text(item, limit=80)
+    ]
+    weight = round(1 / max(1, len(generated)), 3)
+    expanded: list[dict[str, Any]] = []
+    used_ids: set[str] = set()
+    for index, raw in enumerate(generated, 1):
+        persona = copy.deepcopy(source[0]) if source else {}
+        raw_id = re.sub(r"[^a-zA-Z0-9_-]", "-", str(raw.get("id") or ""))[:40]
+        persona_id = base_id if index == 1 else (raw_id or f"{base_id}-{index:02d}")
+        if persona_id in used_ids:
+            persona_id = f"{base_id}-{index:02d}"
+        used_ids.add(persona_id)
+        persona["id"] = persona_id[:40]
+        for field in localized_fields:
+            localized = _study_i18n_pair(raw.get(field), str(persona.get(field) or ""))
+            persona[f"{field}_i18n"] = localized
+            persona[field] = app_i18n.resolve(localized, locale)
+        group = _study_i18n_pair(raw.get("group"), brief.get("audience") or "目标用户")
+        persona["subpopulation_group_i18n"] = group
+        persona["subpopulation_group"] = app_i18n.resolve(group, locale)
+        covered = [
+            lifecycle_safe_text(item, limit=80)
+            for item in (raw.get("covered_segments") or segments or [brief.get("audience") or "目标用户"])
+            if lifecycle_safe_text(item, limit=80)
+        ]
+        persona["covered_segments"] = covered[:8] or [brief.get("audience") or "目标用户"]
+        persona["task_script"] = raw.get("task_script") or persona.get("task_script") or []
+        persona["population_weight"] = weight
+        persona["study_profile_version"] = STUDY_PERSONA_COHORT_VERSION
+        persona["study_profile_source"] = "llm"
+        persona["audience_source"] = brief.get("audience") or ""
+        persona["app_type_source"] = brief.get("app_type") or ""
+        expanded.append(finalize_persona(persona, index=index))
+    return expanded
 
 
 def materialize_study_persona_cohort(
     state: dict[str, Any],
     personas: list[dict[str, Any]] | None = None,
+    *,
+    generate: bool = False,
 ) -> list[dict[str, Any]]:
-    """Expand the start-stage audience into 4-8 virtual-user agents."""
+    """Expand the start-stage owner description into 4-8 LLM-generated virtual users."""
 
     source = [
         copy.deepcopy(item)
         for item in (personas if personas is not None else state.get("personas") or [])
         if isinstance(item, dict)
     ]
-    if not is_agnes_qualification_state(state):
+    if not should_expand_study_persona_cohort(state):
         return source
-    current_version = 0
+    if study_persona_cohort_is_current(state, source):
+        return source
+    if not generate:
+        return source
+    if not source and not any(study_owner_app_brief(state).values()):
+        return source
     try:
-        current_version = int(state.get("study_persona_cohort_version") or 0)
-    except (TypeError, ValueError):
-        current_version = 0
-    if current_version >= STUDY_PERSONA_COHORT_VERSION and 4 <= len(source) <= 8:
+        expanded = generate_study_persona_cohort(state, source)
+    except (WorkflowStopRequested, FatalWorkflowError):
+        raise
+    except Exception as exc:
+        event(
+            state,
+            "study_persona_cohort_generate_failed",
+            error=f"{type(exc).__name__}: {exc}"[:500],
+        )
         return source
-    if not source:
-        return source
-
-    base = source[0]
-    base_id = re.sub(
-        r"[^a-zA-Z0-9_-]",
-        "-",
-        str(base.get("id") or "study-user"),
-    )[:28] or "study-user"
-    locale = prompt_ui_locale(state)
-    audience = study_audience_text(state)
-    segments = _study_audience_segments(audience, str(state.get("intent") or ""))
-
-    def pair(zh: str, en: str) -> dict[str, str]:
-        return app_i18n.pair(zh, en)
-
-    catalog = {
-        "student": (
-            {
-                "suffix": "lin-xiaotong",
-                "name": pair("林晓彤", "Xiaotong Lin"),
-                "age": pair("20", "20"),
-                "gender": pair("女", "Woman"),
-                "location": pair("武汉", "Wuhan"),
-                "role": pair("经常忘记喝水的大学生", "University student who often forgets to drink water"),
-                "tech_level": pair("熟练使用手机应用和课程平台", "Comfortable with phone apps and course platforms"),
-                "device": pair("安卓手机和图书馆电脑", "Android phone and library computer"),
-                "motivation": pair("在上课和自习时被提醒喝水，避免一整天只喝很少水", "get drink reminders during class and study so a whole day is not missed"),
-                "constraints": pair("课间很短，不希望操作复杂", "short breaks between classes and little patience for complex steps"),
-                "scenario": pair("连续上课后才发现自己几乎没喝水", "noticing almost no water intake after back-to-back classes"),
-                "habits": pair("习惯用大按钮快速记录一杯水", "prefers a large button to log one cup quickly"),
-                "group": pair("学生用户", "Student user"),
-            },
-            {
-                "suffix": "zhao-wenbo",
-                "name": pair("赵文博", "Wenbo Zhao"),
-                "age": pair("22", "22"),
-                "gender": pair("男", "Man"),
-                "location": pair("成都", "Chengdu"),
-                "role": pair("经常熬夜写作业的研究生", "Graduate student who often stays up finishing assignments"),
-                "tech_level": pair("熟悉常见学习和协作软件", "Familiar with common study and collaboration software"),
-                "device": pair("iPhone 和 Windows 笔记本", "iPhone and Windows laptop"),
-                "motivation": pair("在长时间学习中保持补水，并看到当天进度", "keep hydrating during long study sessions and see today's progress"),
-                "constraints": pair("晚上容易忽略提醒，需要更明显的提示", "easy to ignore reminders at night and needs a more obvious cue"),
-                "scenario": pair("写论文到深夜后才想起整天没怎么喝水", "remembering late at night that almost no water was logged"),
-                "habits": pair("希望历史记录能按日期回看", "wants a date-based history to review later"),
-                "group": pair("学生用户", "Student user"),
-            },
-        ),
-        "office": (
-            {
-                "suffix": "wang-cuihua",
-                "name": pair("王翠花", "Cuihua Wang"),
-                "age": pair("27", "27"),
-                "gender": pair("女", "Woman"),
-                "location": pair("广州", "Guangzhou"),
-                "role": pair("经常忘记喝水的办公室职员", "Office worker who often forgets to drink water"),
-                "tech_level": pair("熟练使用常见办公和移动应用", "Comfortable with common office and mobile apps"),
-                "device": pair("安卓手机和公司笔记本电脑", "Android phone and company laptop"),
-                "motivation": pair("在忙碌会议之间被提醒喝水并快速记录", "get reminded between meetings and log water quickly"),
-                "constraints": pair("工作中频繁切换任务，通常只能碎片化操作", "frequent task switching and only short moments to interact"),
-                "scenario": pair("连续开会后才发现自己几乎没喝水", "noticing almost no water intake after consecutive meetings"),
-                "habits": pair("习惯用短操作完成记录，之后看进度", "uses short actions to log and later checks progress"),
-                "group": pair("办公室工作者", "Office worker"),
-            },
-            {
-                "suffix": "chen-haoyu",
-                "name": pair("陈浩宇", "Haoyu Chen"),
-                "age": pair("32", "32"),
-                "gender": pair("男", "Man"),
-                "location": pair("深圳", "Shenzhen"),
-                "role": pair("互联网公司产品运营经理", "Product operations manager at an internet company"),
-                "tech_level": pair("技术熟练，长期使用多种协作工具", "Tech proficient and a long-term user of collaboration tools"),
-                "device": pair("iPhone 和 MacBook", "iPhone and MacBook"),
-                "motivation": pair("把喝水目标和工作节奏对齐，减少重复确认", "align water goals with the work rhythm and avoid repeated checking"),
-                "constraints": pair("每天消息很多，对额外录入步骤非常敏感", "a high message volume and little tolerance for extra data-entry steps"),
-                "scenario": pair("会议间隙补记饮水量，稍后按进度回顾", "logging intake between meetings and reviewing progress later"),
-                "habits": pair("偏好清晰分类、简短反馈和快捷操作", "prefers clear categories, concise feedback, and shortcuts"),
-                "group": pair("办公室工作者", "Office worker"),
-            },
-            {
-                "suffix": "liu-simin",
-                "name": pair("刘思敏", "Simin Liu"),
-                "age": pair("25", "25"),
-                "gender": pair("女", "Woman"),
-                "location": pair("上海", "Shanghai"),
-                "role": pair("咨询公司分析师", "Analyst at a consulting firm"),
-                "tech_level": pair("熟悉办公软件，但不愿学习复杂配置", "Comfortable with office software but avoids complex setup"),
-                "device": pair("安卓手机和 Windows 笔记本电脑", "Android phone and Windows laptop"),
-                "motivation": pair("在高压工作中保持补水，避免下午头晕", "stay hydrated under time pressure and avoid afternoon fatigue"),
-                "constraints": pair("注意力经常被消息打断，容易忘记未完成的记录", "frequent interruptions and a risk of forgetting unfinished logs"),
-                "scenario": pair("调研间隙快速补记一杯水", "quickly logging a cup between research tasks"),
-                "habits": pair("常用手机开始记录，再到电脑上查看进度", "starts on her phone and later checks progress on a computer"),
-                "group": pair("办公室工作者", "Office worker"),
-            },
-            {
-                "suffix": "zhou-yuan",
-                "name": pair("周远", "Yuan Zhou"),
-                "age": pair("41", "41"),
-                "gender": pair("男", "Man"),
-                "location": pair("杭州", "Hangzhou"),
-                "role": pair("销售团队负责人", "Sales team lead"),
-                "tech_level": pair("能熟练完成日常操作，但需要直观提示", "Confident with everyday tasks but benefits from clear prompts"),
-                "device": pair("安卓手机和 Windows 台式机", "Android phone and Windows desktop"),
-                "motivation": pair("外出拜访时也能记下喝水并看到是否达标", "log water while visiting clients and see whether the goal is met"),
-                "constraints": pair("经常单手操作手机，无法阅读冗长说明", "often uses his phone one-handed and cannot read lengthy instructions"),
-                "scenario": pair("拜访客户后补记饮水和下一步安排", "logging water and next steps after customer visits"),
-                "habits": pair("偏好大按钮、明确状态和最近记录入口", "prefers large controls, explicit status, and recent-item access"),
-                "group": pair("办公室工作者", "Office worker"),
-            },
-        ),
-        "teacher": (
-            {
-                "suffix": "sun-yalan",
-                "name": pair("孙雅兰", "Yalan Sun"),
-                "age": pair("36", "36"),
-                "gender": pair("女", "Woman"),
-                "location": pair("南京", "Nanjing"),
-                "role": pair("中学教师", "Secondary-school teacher"),
-                "tech_level": pair("能使用常见教学和手机应用", "Comfortable with common teaching and phone apps"),
-                "device": pair("安卓手机", "Android phone"),
-                "motivation": pair("在连续上课期间被提醒喝水", "get drink reminders during consecutive classes"),
-                "constraints": pair("课堂上不能频繁看手机", "cannot check the phone often during class"),
-                "scenario": pair("下课铃响后才想起还没喝水", "remembering only after the bell that no water was logged"),
-                "habits": pair("希望提醒简短、记录一步完成", "wants short reminders and one-step logging"),
-                "group": pair("教师用户", "Teacher user"),
-            },
-        ),
-        "parent": (
-            {
-                "suffix": "he-min",
-                "name": pair("何敏", "Min He"),
-                "age": pair("38", "38"),
-                "gender": pair("女", "Woman"),
-                "location": pair("长沙", "Changsha"),
-                "role": pair("兼顾工作和带娃的家长", "Working parent"),
-                "tech_level": pair("熟练使用手机，但不想设置太多规则", "Comfortable with phones but avoids many settings"),
-                "device": pair("iPhone", "iPhone"),
-                "motivation": pair("自己和家人都能被提醒按时喝水", "remind herself and the family to drink on time"),
-                "constraints": pair("晚上时间碎，容易忘记打开应用", "evenings are fragmented and the app is easy to forget"),
-                "scenario": pair("忙完家务后补看当天有没有达标", "checking after chores whether today's goal was met"),
-                "habits": pair("希望打开就能看到进度", "wants progress visible as soon as the app opens"),
-                "group": pair("家长用户", "Parent user"),
-            },
-        ),
-        "elder": (
-            {
-                "suffix": "wu-guizhen",
-                "name": pair("吴桂珍", "Guizhen Wu"),
-                "age": pair("67", "67"),
-                "gender": pair("女", "Woman"),
-                "location": pair("合肥", "Hefei"),
-                "role": pair("需要大字和简单操作的老年用户", "Older adult who needs large text and simple actions"),
-                "tech_level": pair("只会常用大按钮操作", "Uses only common large-button actions"),
-                "device": pair("大屏安卓手机", "Large-screen Android phone"),
-                "motivation": pair("被清楚提醒喝水，并确认自己记下来了", "get a clear reminder and confirm the log was saved"),
-                "constraints": pair("看不清小字，也不想设置复杂选项", "cannot read small text and avoids complex settings"),
-                "scenario": pair("家人提醒后打开应用补记一杯水", "opening the app after a family reminder to log one cup"),
-                "habits": pair("只要大按钮和明确对错反馈", "wants large buttons and explicit success feedback"),
-                "group": pair("老年用户", "Older adult user"),
-            },
-        ),
-        "child": (
-            {
-                "suffix": "chen-zihan",
-                "name": pair("陈子涵", "Zihan Chen"),
-                "age": pair("12", "12"),
-                "gender": pair("男", "Boy"),
-                "location": pair("苏州", "Suzhou"),
-                "role": pair("需要简单记录的学生儿童", "School-age child who needs simple logging"),
-                "tech_level": pair("会用常见儿童和学校应用", "Uses common child and school apps"),
-                "device": pair("家长的安卓平板", "A parent's Android tablet"),
-                "motivation": pair("用有趣的方式记住喝水", "remember to drink water in a playful way"),
-                "constraints": pair("不会阅读长说明", "will not read long instructions"),
-                "scenario": pair("放学回家后补记白天喝了几杯", "logging how many cups were drunk after school"),
-                "habits": pair("喜欢图标和大按钮", "likes icons and large buttons"),
-                "group": pair("儿童用户", "Child user"),
-            },
-        ),
-        "health": (
-            {
-                "suffix": "gao-li",
-                "name": pair("高丽", "Li Gao"),
-                "age": pair("45", "45"),
-                "gender": pair("女", "Woman"),
-                "location": pair("西安", "Xi'an"),
-                "role": pair("需要按医嘱关注饮水的用户", "User who tracks water intake by health advice"),
-                "tech_level": pair("能完成日常手机操作", "Can complete everyday phone tasks"),
-                "device": pair("安卓手机", "Android phone"),
-                "motivation": pair("按目标喝水并保留可回看的记录", "hit a water goal and keep a reviewable history"),
-                "constraints": pair("不希望看到复杂统计", "does not want complex statistics"),
-                "scenario": pair("晚上检查今天有没有达到饮水目标", "checking at night whether today's water goal was met"),
-                "habits": pair("每天打开一次看进度即可", "opens once a day mainly to check progress"),
-                "group": pair("健康关注用户", "Health-focused user"),
-            },
-        ),
-    }
-    selected: list[dict[str, Any]] = []
-    for segment in segments:
-        selected.extend(catalog.get(segment) or ())
-    if "student" in segments and not any(
-        "学生" in str((item.get("group") or {}).get("zh-CN") or item.get("group") or "")
-        for item in selected
-    ):
-        selected[0:0] = list(catalog["student"])
-    if len(selected) < 4:
-        extras = list(catalog["office"]) + list(catalog["student"])
-        for item in extras:
-            if item not in selected:
-                selected.append(item)
-            if len(selected) >= 4:
-                break
-    complexity = len(segments) + (1 if len(audience) > 24 else 0)
-    target = max(4, min(8, 3 + complexity + (1 if len(segments) > 1 else 0)))
-    selected = selected[:target]
-    if len(selected) < 4:
-        selected = (list(catalog["student"]) + list(catalog["office"]))[:4]
-
-    localized_fields = (
-        "name", "age", "gender", "location", "role", "tech_level", "device",
-        "motivation", "constraints", "scenario", "habits",
-    )
-    expanded: list[dict[str, Any]] = []
-    weight = round(1 / max(1, len(selected)), 3)
-    for index, profile in enumerate(selected, 1):
-        persona = copy.deepcopy(base)
-        persona["id"] = base_id if index == 1 else f"{base_id}-{profile['suffix']}"[:40]
-        for field in localized_fields:
-            localized = profile[field]
-            persona[f"{field}_i18n"] = localized
-            persona[field] = app_i18n.resolve(localized, locale)
-        persona["subpopulation_group_i18n"] = profile["group"]
-        persona["subpopulation_group"] = app_i18n.resolve(profile["group"], locale)
-        persona["population_weight"] = weight
-        persona["study_profile_version"] = STUDY_PERSONA_COHORT_VERSION
-        persona["audience_source"] = audience[:240]
-        expanded.append(finalize_persona(persona, index=index))
+    state["study_persona_cohort_version"] = STUDY_PERSONA_COHORT_VERSION
     return expanded
 
 
@@ -13518,9 +13574,15 @@ _PROGRESS_GLUE_ONLY = re.compile(
     r"^(?:更新|完成|修复|新增|改进|调整|和|与|及|的|了|一下|一遍)+$"
 )
 
-_PROGRESS_PLAIN_FALLBACK_ZH = "这一轮我又把产品往前推了一步。你可以打开试用页看看现在的样子。"
+_PROGRESS_PLAIN_FALLBACK_ZH = "这一轮产品又推进了一步。试用页上可以看到当前版本。"
 _PROGRESS_PLAIN_FALLBACK_EN = (
-    "I moved the product forward again this round. You can open the trial page to see how it looks now."
+    "This round moved the product forward again. The trial page has the current version."
+)
+_PROGRESS_VERIFY_ONLY_RE = re.compile(
+    r"(?:重新生成.{0,16}截图|最新截图|480\s*[x×]\s*800|375\s*[x×]\s*812|"
+    r"HTTP\s*200|加载正常|成功加载|可用性检查|"
+    r"电脑网页端|手机网页端)",
+    re.I,
 )
 
 
@@ -13606,6 +13668,29 @@ def _humanize_progress_line(text: str) -> str:
     return "；".join(readable_parts[:3])[:240]
 
 
+def _progress_digest_focus(state: dict[str, Any]) -> str:
+    summary = state.get("public_work_summary") if isinstance(state.get("public_work_summary"), dict) else {}
+    current = public_field(summary.get("current") if isinstance(summary, dict) else "")
+    current = re.sub(r"^(?:正在处理[:：]|已完成[:：])", "", current).strip()
+    if current and current not in _PROGRESS_GENERIC_ITEMS:
+        return current[:80]
+    for task in state.get("tasks") or []:
+        if not isinstance(task, dict) or task_is_implemented(task):
+            continue
+        title = public_non_question_text(task.get("title"), "")
+        if title:
+            return title[:80]
+    return ""
+
+
+def _progress_digest_round(state: dict[str, Any]) -> int:
+    reporting = progress_reporting_state(state)
+    return max(
+        0,
+        int(reporting.get("last_round") or reporting.get("latest_round") or state.get("round") or 0),
+    )
+
+
 def build_progress_digest_summary(state: dict[str, Any], pending_items: list[str]) -> str:
     """One vernacular paragraph for a finished development loop."""
     english = prompt_ui_locale(state) == "en"
@@ -13622,25 +13707,59 @@ def build_progress_digest_summary(state: dict[str, Any], pending_items: list[str
             continue
         if item not in items:
             items.append(item)
-    if not items:
-        return _PROGRESS_PLAIN_FALLBACK_EN if english else _PROGRESS_PLAIN_FALLBACK_ZH
-    if len(items) == 1:
-        return (
-            f"This round I worked on this: {items[0]}. You can open the trial page to see how it looks now."
+    product = [item for item in items if not _PROGRESS_VERIFY_ONLY_RE.search(item)]
+    verify_only = [item for item in items if item not in product]
+    focus = _progress_digest_focus(state)
+    round_num = _progress_digest_round(state)
+    reporting = progress_reporting_state(state)
+    previous = str(reporting.get("unacknowledged_summary") or "")
+    if product:
+        if english:
+            body = (
+                f"This round (#{round_num}): {product[0]}. The trial page has this version."
+                if len(product) == 1
+                else (
+                    f"This round (#{round_num}): {product[0]}. I also {product[1]}. "
+                    "The trial page shows the latest build."
+                )
+            )
+        else:
+            body = (
+                f"这一轮（第{round_num}轮）{product[0]}。试用页上已是这一版。"
+                if len(product) == 1
+                else f"这一轮（第{round_num}轮）{product[0]}，同时{product[1]}。试用页可以看到最新效果。"
+            )
+    elif focus:
+        if english:
+            variants = (
+                f"Round {round_num}: I kept working on {focus} and checked the trial page still opens.",
+                f"In round {round_num} I continued {focus}; the trial page is the current build.",
+                f"Round {round_num} was a check-in on {focus}. Open the trial page for what is there now.",
+            )
+        else:
+            variants = (
+                f"第{round_num}轮我继续在做{focus}，并核对了试用页还能打开。",
+                f"第{round_num}轮仍在完善{focus}，试用页上的当前样子可以再看一眼。",
+                f"这一轮（第{round_num}轮）我核对了{focus}的试用入口仍然可用。",
+            )
+        body = variants[round_num % len(variants)]
+    elif verify_only:
+        body = (
+            f"Round {round_num}: I rechecked the trial views. The trial page has the current build."
             if english
-            else f"这一轮我做了这件事：{items[0]}。你可以打开试用页看看现在的样子。"
+            else f"第{round_num}轮我重新核对了试用页，当前版本可以继续打开看。"
         )
-    if len(items) == 2:
-        return (
-            f"This round I worked on two things: {items[0]}, and {items[1]}. You can open the trial page to see how it looks now."
-            if english
-            else f"这一轮我做了两件事：{items[0]}，还有{items[1]}。你可以打开试用页看看现在的样子。"
-        )
-    return (
-        f"This round I mainly worked on these: {items[0]}, and {items[1]}. The other small changes went in at the same time. You can open the trial page to see how it looks now."
-        if english
-        else f"这一轮我主要做了这些：{items[0]}，还有{items[1]}。其余小改动也一起跟上了。你可以打开试用页看看现在的样子。"
-    )
+    else:
+        body = _PROGRESS_PLAIN_FALLBACK_EN if english else _PROGRESS_PLAIN_FALLBACK_ZH
+        if round_num:
+            body = (
+                f"Round {round_num}: {body}"
+                if english
+                else f"第{round_num}轮，{body}"
+            )
+    if body == previous and focus and focus not in body:
+        body = f"{body} {focus}"[:240]
+    return body[:240]
 
 
 PROGRESS_NO_REPLY_NOTICE = (
@@ -19349,8 +19468,8 @@ def phase_plan(state: dict[str, Any], mailer: Mailer) -> None:
     personas = []
     for index, raw in enumerate(plan["personas"], 1):
         personas.append(finalize_persona(dict(raw), index=index))
-    personas = materialize_study_persona_cohort(state, personas)
-    if len(personas) > len(plan["personas"]):
+    personas = materialize_study_persona_cohort(state, personas, generate=True)
+    if study_persona_cohort_is_current(state, personas) or len(personas) > len(plan["personas"]):
         state["study_persona_cohort_version"] = STUDY_PERSONA_COHORT_VERSION
     for persona in personas:
         session_for(state, persona.get("_session_key") or f"experience:{persona['id']}")
@@ -20849,7 +20968,11 @@ def prepare_internal_test_cohort(
         selected_ids = {str(item) for item in existing.get("persona_ids") or []}
         return [persona for persona in personas if str(persona.get("id")) in selected_ids]
 
-    count = min(INTERNAL_TEST_COHORT_SIZE, len(personas))
+    count = (
+        min(TREATMENT_INTERNAL_TEST_COHORT_SIZE, len(personas))
+        if study_multi_agent_treatment_enabled(state)
+        else min(INTERNAL_TEST_COHORT_SIZE, len(personas))
+    )
     by_id = {str(persona.get("id")): persona for persona in personas}
     selected: list[dict[str, Any]] = []
     for persona_id in state.pop("next_internal_test_priority_personas", []) or []:
@@ -21127,6 +21250,49 @@ def run_developmental_test_agent(
         chrome=True,
         writable=False,
     )
+
+
+def treatment_experience_tester_slot(
+    state: dict[str, Any],
+    *,
+    candidate: str,
+    guardrails: str,
+    developmental_descriptor: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Reuse the developmental tester slot, or create one for review-phase loops."""
+
+    if not study_multi_agent_treatment_enabled(state):
+        return None
+    if developmental_descriptor is not None:
+        return developmental_descriptor
+    slot = state.get("experience_tester")
+    if not isinstance(slot, dict) or str(slot.get("candidate_id") or "") != str(candidate):
+        slot = {
+            "candidate_id": candidate,
+            "guardrail_set_id": guardrails,
+            "tester_attempted": False,
+            "tester_result": None,
+            "tester_error": "",
+        }
+        state["experience_tester"] = slot
+    return slot
+
+
+def treatment_tester_feedback_row(
+    issues: list[dict[str, Any]],
+    *,
+    candidate: str,
+    guardrails: str,
+) -> dict[str, Any]:
+    return {
+        "source": "experience",
+        "persona_id": "development-test-agent",
+        "candidate_id": candidate,
+        "guardrail_set_id": guardrails,
+        "verification_status": "failed",
+        "issues": issues,
+        "gate_failures": [],
+    }
 
 
 def developmental_tester_feedback(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -22187,7 +22353,11 @@ def public_field(value: Any) -> str:
 def public_observation_field(value: Any) -> str:
     """Expose a persona observation only when it cannot narrate agent process."""
     text = public_field(value)
-    return "" if not text or _EXPERIENCE_PROCESS_RE.search(text) else text
+    if not text or _EXPERIENCE_PROCESS_RE.search(text):
+        return ""
+    if _EXPERIENCE_DEVELOPER_VOICE_RE.search(text):
+        return ""
+    return text
 
 
 def experience_persona_intro(persona: dict[str, Any]) -> str:
@@ -22289,7 +22459,7 @@ def experience_copy_body(
             else f"- {'做到了' if passed else '没做成'}：{action}"
         )
     if task_lines:
-        lines += ["", "What I tried:" if english else "我实际试了这些：", *task_lines]
+        lines += ["", "What I tried:" if english else "我实际试了这些：", *task_lines[:2]]
     else:
         lines += [
             "",
@@ -22300,17 +22470,13 @@ def experience_copy_body(
     for issue in result.get("issues") or []:
         if not isinstance(issue, dict):
             continue
-        title = public_observation_field(issue.get("title")) or ("An issue I noticed" if english else "一个不满意点")
-        description = public_observation_field(issue.get("description"))
+        title = public_observation_field(issue.get("title"))
         actual = public_observation_field(issue.get("actual"))
-        expected = public_observation_field(issue.get("expected"))
-        detail_parts = [description]
-        if actual:
-            detail_parts.append(("What happened: " if english else "实际感受：") + actual)
-        if expected:
-            detail_parts.append(("What I expected: " if english else "我希望：") + expected)
-        detail = ("; " if english else "；").join(x for x in detail_parts if x)
-        issue_lines.append(f"- {title}" + ((": " if english else "：") + detail if detail else ""))
+        description = public_observation_field(issue.get("description"))
+        summary = actual or description or title
+        if not summary:
+            continue
+        issue_lines.append(f"- {summary[:48]}")
     # blocker/evidence are internal agent artefacts and may narrate tool use or
     # reasoning. Public mail only exposes a deterministic outcome here.
     blocker = (
@@ -22318,7 +22484,7 @@ def experience_copy_body(
         if english else "本次没有顺利完成界面操作。"
     ) if result.get("blocker") or result.get("computer_use_succeeded") is not True else ""
     if issue_lines or blocker:
-        lines += ["", "What I found:" if english else "我发现的问题：", *issue_lines]
+        lines += ["", "What I found:" if english else "我发现的问题：", *issue_lines[:2]]
         if blocker:
             lines.append(f"- {blocker}")
         lines += [
@@ -22599,6 +22765,16 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         # virtual-user work in this same phase. The handoff is durable and has
         # a message id, so later feedback cannot appear before it in the chat.
         save_state(state)
+    if should_expand_study_persona_cohort(state):
+        generated = materialize_study_persona_cohort(state, generate=True)
+        if generated and generated != state.get("personas"):
+            state["personas"] = generated
+            for persona in generated:
+                session_for(
+                    state,
+                    persona.get("_session_key") or f"experience:{persona['id']}",
+                )
+            save_state(state)
     if runtime_install_gate(state, mailer):
         return
     previous = [
@@ -22607,18 +22783,24 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         if isinstance(row, dict)
         and (not developmental or str(row.get("candidate_id") or "") == str(validated))
     ]
-    if developmental and developmental_descriptor is not None and not developmental_descriptor.get("tester_attempted"):
-        developmental_descriptor["tester_attempted"] = True
-        developmental_descriptor["tester_started_at"] = utcnow()
+    tester_descriptor = treatment_experience_tester_slot(
+        state,
+        candidate=str(validated or ""),
+        guardrails=str(validated_guardrails or ""),
+        developmental_descriptor=developmental_descriptor,
+    )
+    if tester_descriptor is not None and not tester_descriptor.get("tester_attempted"):
+        tester_descriptor["tester_attempted"] = True
+        tester_descriptor["tester_started_at"] = utcnow()
         save_state(state)
         try:
-            tester_result = run_developmental_test_agent(state, developmental_descriptor)
+            tester_result = run_developmental_test_agent(state, tester_descriptor)
         except (WorkflowStopRequested, FatalWorkflowError):
             raise
         except Exception as exc:
             tester_error = f"{type(exc).__name__}: {exc}"[:1_000]
-            developmental_descriptor["tester_error"] = tester_error
-            developmental_descriptor["tester_completed_at"] = utcnow()
+            tester_descriptor["tester_error"] = tester_error
+            tester_descriptor["tester_completed_at"] = utcnow()
             event(
                 state,
                 "developmental_test_agent_failed",
@@ -22627,14 +22809,14 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
             )
             with contextlib.suppress(Exception):
                 publish_developmental_tester_update(
-                    state, mailer, developmental_descriptor, None, tester_error
+                    state, mailer, tester_descriptor, None, tester_error
                 )
         else:
-            developmental_descriptor["tester_result"] = tester_result
-            developmental_descriptor["tester_completed_at"] = utcnow()
+            tester_descriptor["tester_result"] = tester_result
+            tester_descriptor["tester_completed_at"] = utcnow()
             with contextlib.suppress(Exception):
                 publish_developmental_tester_update(
-                    state, mailer, developmental_descriptor, tester_result
+                    state, mailer, tester_descriptor, tester_result
                 )
             event(
                 state,
@@ -22657,7 +22839,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
             for result in previous
         )
     )
-    if previous_environment_only and not developmental:
+    if previous_environment_only and not developmental and not study_multi_agent_treatment_enabled(state):
         state["experience_candidate"] = validated
         state["experience_guardrail_set"] = validated_guardrails
         state["experience_verification_deferred"] = {
@@ -22695,7 +22877,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         unchanged=True,
         cuj_gate=previous_cuj_gate,
     )
-    if previous_bounded_delivery and not developmental:
+    if previous_bounded_delivery and not developmental and not study_multi_agent_treatment_enabled(state):
         state["experience_candidate"] = validated
         state["experience_guardrail_set"] = validated_guardrails
         state["experience_verification_deferred"] = {
@@ -22800,6 +22982,15 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
     for persona_index, persona in enumerate(personas, 1):
         result = cached_results.get(persona["id"])
         persona_script = experience_persona_script(state, persona, personas)
+        follow_script = experience_follow_up_script(
+            [
+                row
+                for row in previous
+                if isinstance(row, dict) and row.get("persona_id") == persona.get("id")
+            ]
+        )
+        if follow_script:
+            persona_script = follow_script
         if not isinstance(result, dict):
             persona_name = public_field(persona.get("name")) or f"体验者 {persona_index}"
             persona_name_i18n = (
@@ -22828,7 +23019,18 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
             artifact_dir = run_dir(state["run_id"]) / "artifacts" / persona["id"] / f"{validated}-r{state['round']}-{uuid.uuid4().hex[:6]}"
             artifact_dir.mkdir(parents=True, exist_ok=True)
             payload = {
-                "task": "严格按画像通过 UI 完成 task_script，并复测上轮不满意点。"
+                "task": "严格按画像通过 UI 完成 task_script。"
+                + (
+                    "本轮只复测上轮你本人提到的问题，不要再做完整巡检。"
+                    if any(
+                        isinstance(row, dict) and row.get("issues")
+                        for row in previous
+                        if isinstance(row, dict) and row.get("persona_id") == persona["id"]
+                    )
+                    else "按平时使用习惯试用核心功能。"
+                )
+                + "你是真实用户，只谈自己能不能完成这件事、哪里不顺手；禁止写 localStorage、认证体系、账号系统、产品成熟度、架构或同步方案。"
+                + "issues 的 title/description/actual/expected 各不超过 40 字，用生活化短句。"
                 + experience_auth_cuj_prompt(state)
                 + "有 experience_twin 时必须只用 Chrome Computer Use（不可用时可用 Playwright 等真实浏览器自动化）打开这个统一 Web Preview，按 persona.device 选择最匹配的 view，并严格使用该 view.route 和 viewport.width/height；跨端任务在同一 shared_session 中切换多个 view。不得为 Android、iOS、鸿蒙或 Windows 编写专用体验分支。没有 experience_twin 时，如实报告需要回到 Claude Code/Codex 原生环境体验，不得读取源码或调用 API 冒充体验。必须把至少一张本轮真实 UI 截图保存到这个全新 artifact_dir，并在 screenshots 返回绝对路径；computer_use_tools 列出实际工具，否则不能 satisfied。公开截图只保留能解释结论的最多 4 张：每个问题最多 1 张，正常流程最终态最多 1 张；等待、轮询、加载中不得反复截图，也不要提交重复画面。截图必须 fullPage=false，关键信息很小时优先截取可见元素并保留必要上下文。不要把体验产物写入源码目录。task_results 必须与 task_script 一一对应且每项含 step_id,status,action,evidence；action 必须抄写 task_script 里用户能看懂的具体动作，evidence 只写实际点了什么、看到了什么，例如「点了记录喝水，今日杯数变成 3」。禁止写「第 N 个预定体验步骤」、内部编号、工具名或推理过程。issues 每项含 title,severity,description,steps,expected,actual,screenshot,affected_guardrails,change_scope,confidence；change_scope 只能是 bug/usability_within_guardrail/new_major_capability/changes_existing_capability。已被用户明确拒绝且列入 ignored_feedback 的大能力不得再次作为阻断问题。你的真实观察会以第一人称体验副本同步给用户，因此 evidence/description/expected/actual 只写实际操作和感受，不写分析过程、置信度、内部编号或工具推理。",
                 "candidate_id": validated,
@@ -22958,12 +23160,11 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
             state["internal_test_queue"] = test_queue
         results.append(result)
         send_experience_copy(state, mailer, persona, result, candidate=validated, attempt=f"r{state.get('round', 0)}")
-        if service_priority_web_messages(
+        service_priority_web_messages(
             state,
             mailer,
             boundary=f"persona_experience_complete:{persona['id']}",
-        ):
-            return
+        )
     latest_by_persona = {
         str(row.get("persona_id") or ""): row
         for row in previous
@@ -23007,16 +23208,17 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         unchanged=unchanged,
         cuj_gate=cuj_gate,
     )
-    developmental_tester_issues = (
-        developmental_tester_feedback(
-            developmental_descriptor.get("tester_result")
-            if isinstance(developmental_descriptor, dict)
-            and isinstance(developmental_descriptor.get("tester_result"), dict)
-            else {}
-        )
-        if developmental
-        else []
+    tester_result_payload = (
+        tester_descriptor.get("tester_result")
+        if isinstance(tester_descriptor, dict)
+        and isinstance(tester_descriptor.get("tester_result"), dict)
+        else {}
     )
+    developmental_tester_issues = developmental_tester_feedback(tester_result_payload)
+    if developmental_tester_issues:
+        all_pass = False
+        environment_only_deferred = False
+        bounded_nonblocking_delivery = False
     record_experience_problems(
         state,
         results,
@@ -23060,15 +23262,11 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         if developmental_tester_issues:
             developmental_feedback.insert(
                 0,
-                {
-                    "source": "experience",
-                    "persona_id": "development-test-agent",
-                    "candidate_id": validated,
-                    "guardrail_set_id": validated_guardrails,
-                    "verification_status": "failed",
-                    "issues": developmental_tester_issues,
-                    "gate_failures": [],
-                },
+                treatment_tester_feedback_row(
+                    developmental_tester_issues,
+                    candidate=validated,
+                    guardrails=validated_guardrails,
+                ),
             )
         if cuj_gate.get("required") and not cuj_gate.get("passed"):
             developmental_feedback.append(
@@ -23221,6 +23419,15 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
             for x in results
             if not persona_experience_passed(x)
         ]
+        if developmental_tester_issues:
+            state["feedback"].insert(
+                0,
+                treatment_tester_feedback_row(
+                    developmental_tester_issues,
+                    candidate=validated,
+                    guardrails=validated_guardrails,
+                ),
+            )
         if cuj_gate.get("required") and not cuj_gate.get("passed"):
             state["feedback"].append(
                 {
@@ -23686,10 +23893,12 @@ def release_agent_satisfaction(
     unresolved_feedback: list[Any],
     p0_count: int,
 ) -> dict[str, Any]:
-    """Aggregate agent satisfaction used as the local release gate.
+    """Aggregate agent satisfaction used as the study release gate.
 
-    The developer, virtual-user, and test agents must agree the app is ready.
-    The owner-intent agent votes only when the owner actually gave feedback.
+    Claude Code Loop freezes when the developer agent judges the app suitable
+    for release. AppLooper additionally requires virtual users and the test
+    agent; the owner-intent agent votes only when the owner actually gave
+    feedback.
     """
 
     multi = study_multi_agent_treatment_enabled(state)
