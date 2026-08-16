@@ -23,7 +23,7 @@
   const OPERATIONS_SKILL_GENERATE_POLL_MS = 2_500;
   const OPERATIONS_SKILL_GENERATE_MAX_WAIT_MS = 600_000;
   const NOTIFICATION_PERMISSION_TIMEOUT_MS = 30_000;
-  const SERVICE_WORKER_VERSION = "190";
+  const SERVICE_WORKER_VERSION = "202";
   const AGENT_AVATAR_ROOT = "./vendor/agent-avatars";
   const AGENT_AVATAR_SOURCES = Object.freeze({
     developer: `${AGENT_AVATAR_ROOT}/development.png`,
@@ -54,25 +54,11 @@
     custom: { surface: "other", platform: "", deviceName: "", width: 1280, height: 800, runtimeProvider: "host_adapter" },
   };
 
-  function requiresExplicitStudyWorkflowChoice() {
-    return false;
-  }
-
-  function usesDirectDeveloperStudyConversation() {
-    return true;
-  }
-
-  function studyHideProjectManagerAgent() {
-    return true;
-  }
-
-  function studyShowRepositoryManagement() {
-    return false;
-  }
-
-  function usesAppLooperStudyTreatment() {
-    return true;
-  }
+  function requiresExplicitStudyWorkflowChoice() { return false; }
+  function usesDirectDeveloperStudyConversation() { return true; }
+  function studyHideProjectManagerAgent() { return true; }
+  function studyShowRepositoryManagement() { return false; }
+  function usesAppLooperStudyTreatment() { return true; }
 
   function clearExplicitStudyWorkflowChoice() {
     try {
@@ -255,14 +241,14 @@
       "twin.title": "远程试用",
       "twin.subtitle": "选择应用形态后，直接远程操作电脑上的真实运行环境",
       "twin.sandbox_title": "我要试用",
-      "twin.sandbox_expand": "告诉研发智能体要试用的功能",
-      "twin.sandbox_copy": "直接说明你要试用的功能，研发智能体会收到这条请求。",
+      "twin.sandbox_expand": "跳转到要试用的功能",
+      "twin.sandbox_copy": "说明你要试用的功能，系统会先准备临时状态并跳转到对应界面。",
       "twin.sandbox_label": "我要试用的功能",
       "twin.sandbox_placeholder": "例如：我要试用一句话记录功能",
-      "twin.sandbox_configure": "告诉研发智能体",
-      "twin.sandbox_configuring": "正在发送试用请求…",
-      "twin.sandbox_ready": "研发智能体已收到“{label}”，你可以继续操作当前试用窗口。",
-      "twin.sandbox_failed": "试用请求发送失败，请重试。",
+      "twin.sandbox_configure": "跳转",
+      "twin.sandbox_configuring": "正在准备并跳转…",
+      "twin.sandbox_ready": "已跳转到“{label}”，可直接在当前试用窗口操作。",
+      "twin.sandbox_failed": "跳转失败，请重试。",
       "twin.feedback_title": "向研发智能体描述需要优化的点",
       "twin.feedback_expand": "描述需要优化的点",
       "twin.feedback_copy": "清楚说明哪里需要优化，研发智能体会继续处理。",
@@ -1786,14 +1772,14 @@
       "twin.title": "Remote trial",
       "twin.subtitle": "Choose a surface, then control its real runtime on your computer",
       "twin.sandbox_title": "I want to try",
-      "twin.sandbox_expand": "Tell the developer agent which feature to try",
-      "twin.sandbox_copy": "Name the feature you want to try. The developer agent receives the request directly.",
+      "twin.sandbox_expand": "Jump to the feature you want to try",
+      "twin.sandbox_copy": "Describe the feature. The trial window will prepare temporary state and jump there.",
       "twin.sandbox_label": "Feature I want to try",
       "twin.sandbox_placeholder": "For example: I want to try the one-line memory feature",
-      "twin.sandbox_configure": "Tell developer agent",
-      "twin.sandbox_configuring": "Sending trial request…",
-      "twin.sandbox_ready": "The developer agent received “{label}”. You can keep using the current trial window.",
-      "twin.sandbox_failed": "Could not send the trial request. Please retry.",
+      "twin.sandbox_configure": "Jump",
+      "twin.sandbox_configuring": "Preparing and jumping…",
+      "twin.sandbox_ready": "Jumped to “{label}”. You can use it in the current trial window.",
+      "twin.sandbox_failed": "Could not jump. Please retry.",
       "twin.feedback_title": "Describe what the developer agent should improve",
       "twin.feedback_expand": "Describe what needs improvement",
       "twin.feedback_copy": "Explain what should improve and the developer agent will continue from it.",
@@ -3312,6 +3298,7 @@
     remoteExperienceSession: null,
     remoteExperienceError: null,
     remoteExperienceStarting: false,
+    remoteExperienceExpiredRecovered: false,
     remoteExperiencePollTimer: null,
     remoteExperienceCatalogRequest: 0,
     remoteExperienceSessionStartRequest: 0,
@@ -3734,7 +3721,7 @@
       void loadNotificationStatus({ silent: true });
     }, 0);
     startRefreshTimers();
-    return;
+    void restoreRepositoryDialogSessionIfNeeded();
   }
 
   function collectDom() {
@@ -3802,9 +3789,9 @@
       "experienceTwinUnread",
       "launchTab",
       "launchUnread",
+      "downloadSourceExportButton",
       "growthTab",
       "growthUnread",
-      "downloadSourceExportButton",
       "experienceTwinPage",
       "experienceTwinBody",
       "addExperienceSurfaceButton",
@@ -4668,9 +4655,9 @@
         void sendTrialSandboxFeedback();
       }
     });
-    dom.addExperienceSurfaceButton?.addEventListener("click", openExperienceSurfaceDialog);
-    dom.downloadSourceExportButton?.addEventListener("click", () => void downloadSourceExport());
+    dom.addExperienceSurfaceButton.addEventListener("click", openExperienceSurfaceDialog);
     dom.launchTab?.addEventListener("click", openLaunch);
+    dom.downloadSourceExportButton?.addEventListener("click", () => void downloadSourceExport());
     dom.growthTab?.addEventListener("click", openGrowth);
     dom.launchChecklistAction?.addEventListener("click", () => submitLaunchChecklistAction());
     dom.launchAutoToggle?.addEventListener("change", () => void persistLaunchAutoPolicy());
@@ -7237,6 +7224,20 @@
     return firstText(app?.id, app?.app_id, app?.run_id, app?.workflow_id);
   }
 
+  function appWorkflowType(app) {
+    const stable = firstText(app?.workflow_type, app?.workflowType).trim().toUpperCase();
+    if (/^[AB]$/.test(stable)) return stable;
+    const legacy = firstText(app?.name, app?.title);
+    const match = legacy.match(/^\s*(?:流程类型|Workflow\s+Type)\s*([AB])\s*[·•|]\s*/i);
+    return match ? match[1].toUpperCase() : "";
+  }
+
+  function legacyWorkflowAppType(app) {
+    const legacy = firstText(app?.name, app?.title);
+    const match = legacy.match(/^\s*(?:流程类型|Workflow\s+Type)\s*[AB]\s*[·•|]\s*(.+?)\s*$/i);
+    return firstText(match?.[1]);
+  }
+
   function appTitle(app) {
     const title = localizedFirstField(app, ["name", "title", "app_type", "type"]);
     const cleaned = String(title || "").replace(/^\s*(?:流程类型|Workflow\s+Type)\s*[AB]\s*[·•|]\s*/i, "").trim();
@@ -7266,6 +7267,15 @@
     // successful detail switch can update the header while the memoized list
     // keeps the previous card highlighted.
     return `${state.currentId}\u0000${rows}`;
+  }
+
+  function studyAppSortLetter(app, index = 0) {
+    const typed = appWorkflowType(app);
+    if (typed === "A" || typed === "B") return typed;
+    const title = appTitle(app);
+    if (/流程类型\s*B|Workflow Type B/i.test(title)) return "B";
+    if (/流程类型\s*A|Workflow Type A/i.test(title)) return "A";
+    return index === 0 ? "A" : "B";
   }
 
   function sortedStudyApps(apps = state.apps) {
@@ -7361,7 +7371,6 @@
     stopDeveloperSessionPolling();
     closeDialog(dom.developerSessionDialog);
     state.current = null;
-    const studyChoice = false;
     dom.appTitle.textContent = t("apps.select");
     dom.statusBadge.hidden = true;
     dom.phaseLine.hidden = true;
@@ -7514,10 +7523,11 @@
     dom.phaseLine.hidden = false;
 
     const workspace = currentWorkspace(current);
+    const showWorkspace = document.documentElement.dataset.studyShowWorkspace !== "0";
     dom.workspaceText.textContent = workspace;
     dom.workspaceText.title = workspace;
     dom.workspaceLine.title = workspace;
-    dom.workspaceLine.hidden = !workspace;
+    dom.workspaceLine.hidden = !workspace || !showWorkspace;
     if (dom.editWorkspaceButton) dom.editWorkspaceButton.hidden = !workspace;
     if (dom.editCodingAgentButton) dom.editCodingAgentButton.hidden = !workspace;
 
@@ -7767,6 +7777,7 @@
       });
       const focus = result?.focus || {};
       state.trialSandboxFocus = focus;
+      applyTrialSandboxJump(focus);
       if (dom.trialSandboxStatus) {
         dom.trialSandboxStatus.textContent = t("twin.sandbox_ready", {
           label: focus.label || focus.description || description,
@@ -7781,6 +7792,21 @@
     } finally {
       state.trialSandboxBusy = false;
       if (dom.trialSandboxConfigureButton) dom.trialSandboxConfigureButton.disabled = false;
+    }
+  }
+
+  function applyTrialSandboxJump(focus) {
+    const route = firstText(focus?.route, "/");
+    const seed = focus?.trial_seed && typeof focus.trial_seed === "object"
+      ? focus.trial_seed
+      : (focus?.trialSeed && typeof focus.trialSeed === "object" ? focus.trialSeed : {});
+    openPlainReleaseReviewRoute(route, {
+      ensureLogs: seed.ensure_logs ?? seed.ensureLogs,
+      focusId: seed.focus_id ?? seed.focusId,
+      storageKey: seed.storage_key ?? seed.storageKey,
+    });
+    if (state.remoteExperienceConnected) {
+      void reloadActiveExperienceTwinFrame();
     }
   }
 
@@ -8122,6 +8148,10 @@
       }
       return true;
     } catch (error) {
+      if (remoteDisplayRequestIsTransient(error)) {
+        continueRemoteDisplayStartup(view);
+        return true;
+      }
       state.remoteDisplayServiceStatus = {
         phase: "error",
         surface_id: view.id,
@@ -8270,6 +8300,10 @@
       await applyRemoteDisplayServiceStatus(payload, appIdValue, surfaceId);
     } catch (error) {
       if (appIdValue !== state.currentId || surfaceId !== activeExperienceTwinView()?.id) return;
+      if (remoteDisplayRequestIsTransient(error)) {
+        continueRemoteDisplayStartup(view);
+        return;
+      }
       state.remoteDisplayServiceStatus = {
         phase: "error",
         surface_id: surfaceId,
@@ -8295,6 +8329,10 @@
       await applyRemoteDisplayServiceStatus(payload, appIdValue, view.id);
     } catch (error) {
       if (appIdValue !== state.currentId || view.id !== activeExperienceTwinView()?.id) return;
+      if (remoteDisplayRequestIsTransient(error)) {
+        continueRemoteDisplayStartup(view);
+        return;
+      }
       state.remoteDisplayServiceStatus = {
         phase: "error",
         surface_id: view.id,
@@ -8302,6 +8340,26 @@
       };
       renderExperienceTwin(error);
     }
+  }
+
+  function remoteDisplayRequestIsTransient(error) {
+    if (!(error instanceof ApiError)) return true;
+    const code = firstText(error.payload?.code);
+    return code === "request_timeout" || error.status === 0 || error.status >= 500;
+  }
+
+  function continueRemoteDisplayStartup(view) {
+    if (!view?.id) return;
+    state.remoteExperienceError = null;
+    state.remoteDisplayServiceStatus = {
+      phase: "starting",
+      surface_id: view.id,
+      message: t("twin.remote_starting_display"),
+      retry_after_ms: 2_000,
+    };
+    renderExperienceTwin();
+    window.clearTimeout(state.remoteDisplayServiceTimer);
+    state.remoteDisplayServiceTimer = window.setTimeout(pollRemoteDisplayService, 2_000);
   }
 
   async function applyRemoteDisplayServiceStatus(payload, appIdValue, surfaceId) {
@@ -8454,6 +8512,9 @@
       if (requestNumber !== state.remoteExperienceSessionPollRequest || appIdValue !== state.currentId) return;
       state.remoteExperienceSession = normalizeRemoteExperienceSession(payload?.session ?? payload) || state.remoteExperienceSession;
       state.remoteExperienceError = null;
+      if (state.remoteExperienceSession?.status === "ready") {
+        state.remoteExperienceExpiredRecovered = false;
+      }
       renderExperienceTwin();
       scheduleRemoteExperiencePoll();
     } catch (error) {
@@ -8461,6 +8522,12 @@
       state.remoteExperienceError = error;
       if (error instanceof ApiError && [404, 410].includes(error.status)) {
         state.remoteExperienceSession = { ...state.remoteExperienceSession, status: "expired" };
+        if (!state.remoteExperienceExpiredRecovered) {
+          state.remoteExperienceExpiredRecovered = true;
+          renderExperienceTwin();
+          void startRemoteExperienceSession({ force: true });
+          return;
+        }
       } else {
         // A brief Funnel/mobile-network interruption must not turn an otherwise
         // healthy remote runtime into a permanent failure.  Keep the server's
@@ -8892,9 +8959,14 @@
   function bindExperienceTwinImeDrag() {
     const bridge = dom.experienceTwinImeBridge;
     const handle = dom.experienceTwinImeDrag;
-    if (!bridge || !handle || handle.dataset.dragBound === "1") return;
-    handle.dataset.dragBound = "1";
+    if (!bridge || bridge.dataset.dragBound === "1") return;
+    bridge.dataset.dragBound = "1";
     let drag = null;
+
+    const isInteractiveTarget = (node) => {
+      if (!(node instanceof Element)) return false;
+      return Boolean(node.closest("input, textarea, button, [contenteditable='true']"));
+    };
 
     const endDrag = (event) => {
       if (!drag || (event?.pointerId != null && drag.pointerId !== event.pointerId)) return;
@@ -8907,14 +8979,15 @@
       drag = null;
       bridge.classList.remove("is-dragging");
       try {
-        handle.releasePointerCapture?.(event.pointerId);
+        bridge.releasePointerCapture?.(event.pointerId);
       } catch {
         // Pointer may already be released.
       }
     };
 
-    handle.addEventListener("pointerdown", (event) => {
+    const startDrag = (event) => {
       if (event.button != null && event.button !== 0) return;
+      if (isInteractiveTarget(event.target) && event.target !== handle) return;
       const stage = experienceTwinImeBridgeStage();
       if (!stage || bridge.hidden) return;
       const stageRect = stage.getBoundingClientRect();
@@ -8933,24 +9006,31 @@
       };
       bridge.classList.add("is-dragging");
       try {
-        handle.setPointerCapture(event.pointerId);
+        bridge.setPointerCapture(event.pointerId);
       } catch {
         // Some browsers reject capture on non-primary pointers.
       }
       event.preventDefault();
-    });
+      event.stopPropagation();
+    };
 
-    handle.addEventListener("pointermove", (event) => {
+    const moveDrag = (event) => {
       if (!drag || drag.pointerId !== event.pointerId) return;
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
       if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
       applyExperienceTwinImeBridgePosition(drag.originLeft + dx, drag.originTop + dy);
-    });
+      event.preventDefault();
+      event.stopPropagation();
+    };
 
-    handle.addEventListener("pointerup", endDrag);
-    handle.addEventListener("pointercancel", endDrag);
-    handle.addEventListener("dblclick", (event) => {
+    bridge.addEventListener("pointerdown", startDrag);
+    handle?.addEventListener("pointerdown", startDrag);
+    window.addEventListener("pointermove", moveDrag, { capture: true });
+    window.addEventListener("pointerup", endDrag, { capture: true });
+    window.addEventListener("pointercancel", endDrag, { capture: true });
+    bridge.addEventListener("dblclick", (event) => {
+      if (isInteractiveTarget(event.target) && event.target !== handle) return;
       event.preventDefault();
       clearExperienceTwinImeBridgePosition();
     });
@@ -9202,7 +9282,7 @@
       defaultCopy = t("twin.surface_prep_configuring_copy");
     }
     const prepActive = state.surfacePreparationStarting || ["queued", "configuring"].includes(surfacePreparationPhase());
-    const customCopy = ["idle", "preparation_timeout"].includes(kind) || (kind === "unavailable" && prepActive)
+    const customCopy = ["idle", "preparation_timeout", "expired", "stopped"].includes(kind) || (kind === "unavailable" && prepActive)
       ? ""
       : firstText(displayStatus?.message, session?.message, state.remoteExperience?.message, state.experienceTwin?.fallback?.message);
     const localizedCustomCopy = state.locale !== "zh-CN" && /[\u3400-\u9fff]/.test(customCopy)
@@ -9304,6 +9384,11 @@
       start.type = "button";
       start.addEventListener("click", () => startRemoteExperienceSession({ force: true }));
       actions.append(start);
+    } else if (kind === "expired" || kind === "stopped") {
+      const retry = element("button", "primary-button compact", t("twin.retry"));
+      retry.type = "button";
+      retry.addEventListener("click", () => startRemoteExperienceSession({ force: true }));
+      actions.append(retry);
     } else if (!["empty"].includes(kind)) {
       const retry = element("button", "secondary-button compact", t("twin.retry"));
       retry.type = "button";
@@ -9631,8 +9716,10 @@
     if (state.remoteExperienceRfbModule) return Promise.resolve(state.remoteExperienceRfbModule);
     if (!state.remoteExperienceRfbModulePromise) {
       let timeoutId = null;
-      // Load noVNC from the local API asset route so relative imports stay
-      // under the same module tree.
+      // Keep noVNC behind the tenant API asset route.  Resolving this relative
+      // to app.js automatically inherits /applooper or /applooper-test at the
+      // study gateway, while a direct tenant resolves it to root /api.  The
+      // relative imports inside rfb.js then stay under that same module tree.
       const loading = import("./api/remote-experience/novnc/core/rfb.js?v=166")
         .then((module) => {
           state.remoteExperienceRfbModule = module;
@@ -9858,6 +9945,7 @@
     state.remoteExperienceStarting = false;
     state.remoteExperienceStartKey = "";
     state.remoteExperienceError = null;
+    state.remoteExperienceExpiredRecovered = false;
     state.remoteExperienceSession = null;
     state.remoteDisplayServiceStatus = null;
     window.clearTimeout(state.remoteDisplayServiceTimer);
@@ -10157,9 +10245,9 @@
     const mainActive = !twinActive && !productActive && state.chatView === "main";
     const experienceActive = !twinActive && !productActive && state.chatView === "developer";
     const validationActive = !productActive && (twinActive || state.chatView === "experience");
-    dom.conversationTabs.setAttribute("aria-label", t("conversation.tabs_aria"));
+    dom.conversationTabs.setAttribute("aria-label", t(directDeveloperStudy ? "conversation.study_tabs_aria" : "conversation.tabs_aria"));
     if (dom.mainConversationTab) {
-      dom.mainConversationTab.hidden = true;
+      dom.mainConversationTab.hidden = directDeveloperStudy;
       dom.mainConversationTab.classList.toggle("is-active", mainActive);
       dom.mainConversationTab.setAttribute("aria-selected", String(mainActive));
     }
@@ -19426,7 +19514,6 @@
     const needs = dom.needsInput.value.trim() || t("create.needs_default");
     dom.intentPreview.textContent = t("create.intent", { audience, appType, needs });
   }
-
 
   async function downloadSourceExport() {
     if (!state.currentId) {

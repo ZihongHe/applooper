@@ -10,7 +10,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
-    <link rel="stylesheet" href="./styles.css?v=198" />
+    <link rel="stylesheet" href="./styles.css?v=202" />
     <title>AppLooper</title>
   </head>
   <body>
@@ -248,7 +248,7 @@
                   <label class="trial-composer-label" id="trialSandboxTitle" for="trialSandboxInput" data-i18n="twin.sandbox_title">我要试用</label>
                   <div class="trial-sandbox-form">
                     <textarea id="trialSandboxInput" rows="1" data-i18n-placeholder="twin.sandbox_placeholder" placeholder="例如：我要试用一句话记录功能"></textarea>
-                    <button class="primary-button" id="trialSandboxConfigureButton" type="button" data-i18n="twin.sandbox_configure">告诉研发智能体</button>
+                    <button class="primary-button" id="trialSandboxConfigureButton" type="button" data-i18n="twin.sandbox_configure">跳转</button>
                   </div>
                   <p class="trial-sandbox-status" id="trialSandboxStatus" aria-live="polite"></p>
                 </section>
@@ -1146,6 +1146,7 @@
       </div>
     </dialog>
 
+
     <dialog class="modal release-final-confirm-modal" id="releaseFinalConfirmDialog" aria-labelledby="releaseFinalConfirmTitle">
       <div class="release-final-confirm-card">
         <h2 id="releaseFinalConfirmTitle" data-i18n="release.final_confirm_title">确认最终判定</h2>
@@ -1273,8 +1274,8 @@
       </div>
     </template>
 
-    <script src="./i18n.js?v=193" defer></script>
-    <script src="./boot.js?v=193" defer></script>
-    <script id="appBundle" src="./app.js?v=199" defer></script>
+    <script src="./i18n.js?v=202" defer></script>
+    <script src="./boot.js?v=202" defer></script>
+    <script id="appBundle" src="./app.js?v=202" defer></script>
   </body>
 </html>

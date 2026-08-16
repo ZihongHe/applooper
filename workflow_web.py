@@ -3087,6 +3087,8 @@ class WorkflowWebService:
         self._remote_display_lock = threading.RLock()
         self._remote_display_processes: dict[tuple[str, str], dict[str, Any]] = {}
         self._remote_display_install_threads: dict[tuple[str, str], threading.Thread] = {}
+        self._remote_display_start_threads: dict[tuple[str, str], threading.Thread] = {}
+        self._remote_display_start_states: dict[tuple[str, str], dict[str, Any]] = {}
         self._surface_preparation_threads: dict[tuple[str, str], threading.Thread] = {}
         self._managed_web_preview_lock = threading.RLock()
         self._managed_web_previews: dict[tuple[str, str], ManagedWebPreview] = {}
@@ -4789,6 +4791,12 @@ class WorkflowWebService:
             "[server path removed]",
             clean,
         )
+        clean = re.sub(
+            r"(?i)(?:https?://)?(?:www\.)?yeasier\.com(?:/[^\s\"'`<>)\]]*)?",
+            "[server address removed]",
+            clean,
+        )
+        clean = clean.replace("120.241.88.66", "[server address removed]")
         if path.suffix.casefold() == ".json":
             try:
                 payload = json.loads(clean)
@@ -6039,13 +6047,6 @@ class WorkflowWebService:
         legacy_name = str(record.get("name") or "").strip()
         workflow_type = ""
         workflow_app_label = str(record.get("workflow_app_label") or "").strip()
-        legacy_workflow_match = re.fullmatch(
-            r"\s*(?:流程类型|Workflow\s+Type)\s*[AB]\s*[·•|]\s*(.+?)\s*",
-            legacy_name,
-            re.I | re.S,
-        )
-        if not workflow_app_label and legacy_workflow_match:
-            workflow_app_label = legacy_workflow_match.group(1).strip()
         app_type_i18n = _canonical_dynamic_pair(
             app_type,
             record.get("app_type_i18n"),
@@ -6054,19 +6055,14 @@ class WorkflowWebService:
             workflow_app_label or app_type,
             record.get("workflow_app_label_i18n"),
         )
-        fallback_name = (
-            workflow_app_label
-            or re.sub(
-                r"^\s*(?:流程类型|Workflow\s+Type)\s*[AB]\s*[·•|]\s*",
-                "",
-                legacy_name,
-                flags=re.I,
-            ).strip()
-            or legacy_name
-            or (
-                (app_type if app_type.endswith("应用") else f"{app_type}应用")
-                if app_type else "未命名应用"
-            )
+        fallback_name = re.sub(
+            r"^\s*(?:流程类型|Workflow\s+Type)\s*[AB]\s*[·•|]\s*",
+            "",
+            legacy_name,
+            flags=re.I,
+        ).strip() or (
+            (app_type if app_type.endswith("应用") else f"{app_type}应用")
+            if app_type else "未命名应用"
         )
         fallback_pair = _canonical_dynamic_pair(
             fallback_name,
@@ -10669,6 +10665,28 @@ class WorkflowWebService:
             }
 
         if self._is_isolated_web_surface(surface):
+            start_state = self._remote_display_start_snapshot(run_id, surface["id"])
+            if start_state.get("alive"):
+                return self._remote_display_starting_public(run_id, surface, common)
+            if start_state.get("phase") == "error":
+                error = start_state.get("error") if isinstance(start_state.get("error"), dict) else {}
+                message = str(error.get("message") or "隔离网页窗口启动失败")
+                return {
+                    **common,
+                    "phase": "error",
+                    "status": "error",
+                    "can_start": True,
+                    "requires_install_confirmation": False,
+                    "missing_components": [],
+                    "message": message,
+                    "error": {
+                        "code": str(error.get("code") or "isolated_surface_start_failed"),
+                        "message": message,
+                    },
+                    "retry_after_ms": 0,
+                    "launcher": {"provider": "isolated_chromium", "label": "隔离网页窗口"},
+                    "target": None,
+                }
             stale_reason, stale_identity = self._managed_web_preview_stale_reason(
                 state, surface
             )
@@ -11114,6 +11132,109 @@ class WorkflowWebService:
             },
         }
 
+    def _remote_display_start_snapshot(
+        self,
+        run_id: str,
+        surface_id: str,
+    ) -> dict[str, Any]:
+        key = (run_id, surface_id)
+        with self._remote_display_lock:
+            thread = self._remote_display_start_threads.get(key)
+            record = self._remote_display_start_states.get(key)
+            return {
+                "alive": bool(thread is not None and thread.is_alive()),
+                **(dict(record) if isinstance(record, dict) else {}),
+            }
+
+    def _remote_display_starting_public(
+        self,
+        run_id: str,
+        surface: dict[str, Any],
+        common: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            "run_id": run_id,
+            "surface_id": str(surface.get("id") or ""),
+            "surface": public_json(surface),
+            "phase": "starting",
+            "status": "starting",
+            "started": True,
+            "can_start": False,
+            "requires_install_confirmation": False,
+            "missing_components": [],
+            "message": "正在启动只包含这个网页形态的隔离窗口",
+            "error": None,
+            "retry_after_ms": 1_000,
+            "launcher": {"provider": "isolated_chromium", "label": "隔离网页窗口"},
+            "target": None,
+            "updated_at": utcnow(),
+        }
+        if common:
+            payload = {**common, **payload}
+        return payload
+
+    def _remote_display_start_worker(self, run_id: str, surface_id: str) -> None:
+        key = (run_id, surface_id)
+        try:
+            state = self.load_app_state(run_id)
+            surface = self._remote_display_surface(state, surface_id)
+            self._ensure_browser_surface_runtime_with_preview_recovery(
+                state,
+                surface,
+                trigger="display_service",
+            )
+            with self._remote_display_lock:
+                self._remote_display_start_states[key] = {
+                    "phase": "ready",
+                    "error": None,
+                    "finished_at": utcnow(),
+                }
+        except (OSError, SurfaceRuntimeError, APIError) as exc:
+            message = str(exc) or "隔离网页窗口启动失败"
+            with self._remote_display_lock:
+                self._remote_display_start_states[key] = {
+                    "phase": "error",
+                    "error": {
+                        "code": "isolated_surface_start_failed",
+                        "message": message,
+                    },
+                    "finished_at": utcnow(),
+                }
+        finally:
+            with self._remote_display_lock:
+                current = self._remote_display_start_threads.get(key)
+                if current is threading.current_thread():
+                    self._remote_display_start_threads.pop(key, None)
+
+    def warm_remote_display_services(self) -> int:
+        """Rebuild isolated web displays after a tenant process start."""
+
+        runs_root = workflow_agent.state_home() / "runs"
+        if not runs_root.is_dir():
+            return 0
+        started = 0
+        for path in sorted(runs_root.iterdir()):
+            run_id = path.name
+            if not path.is_dir() or not RUN_ID_RE.fullmatch(run_id):
+                continue
+            try:
+                state = self.load_app_state(run_id)
+            except (APIError, OSError, RuntimeError, ValueError):
+                continue
+            for surface in self.remote_experience_surfaces(state):
+                if not self._is_isolated_web_surface(surface):
+                    continue
+                try:
+                    status = self.remote_display_service_status(run_id, str(surface["id"]))
+                except APIError:
+                    continue
+                phase = str(status.get("phase") or "")
+                error_code = str((status.get("error") or {}).get("code") or "")
+                if phase == "can_start" or error_code == "preview_runtime_stale":
+                    self.start_remote_display_service(run_id, str(surface["id"]))
+                    started += 1
+        return started
+
     def start_remote_display_service(
         self,
         run_id: str,
@@ -11122,6 +11243,9 @@ class WorkflowWebService:
         """Start one known VNC provider; never install software or run input."""
 
         status = self.remote_display_service_status(run_id, surface_id)
+        if status["phase"] == "starting":
+            status["started"] = True
+            return status
         stale_preview = (
             str((status.get("error") or {}).get("code") or "")
             == "preview_runtime_stale"
@@ -11135,38 +11259,24 @@ class WorkflowWebService:
         state = self.load_app_state(run_id)
         surface = self._remote_display_surface(state, surface_id)
         if self._is_isolated_web_surface(surface):
-            try:
-                _target, state, surface = (
-                    self._ensure_browser_surface_runtime_with_preview_recovery(
-                        state,
-                        surface,
-                        trigger="display_service",
+            key = (run_id, surface["id"])
+            with self._remote_display_lock:
+                active = self._remote_display_start_threads.get(key)
+                if active is None or not active.is_alive():
+                    self._remote_display_start_states[key] = {
+                        "phase": "starting",
+                        "error": None,
+                        "started_at": utcnow(),
+                    }
+                    thread = threading.Thread(
+                        target=self._remote_display_start_worker,
+                        args=(run_id, surface["id"]),
+                        daemon=True,
+                        name=f"remote-display-start-{run_id}-{surface['id']}",
                     )
-                )
-            except (OSError, SurfaceRuntimeError) as exc:
-                return {
-                    "run_id": run_id,
-                    "surface_id": surface["id"],
-                    "surface": public_json(surface),
-                    "phase": "error",
-                    "status": "error",
-                    "started": False,
-                    "can_start": True,
-                    "requires_install_confirmation": False,
-                    "missing_components": [],
-                    "message": str(exc) or "隔离网页窗口启动失败",
-                    "error": {
-                        "code": "isolated_surface_start_failed",
-                        "message": str(exc) or "隔离网页窗口启动失败",
-                    },
-                    "retry_after_ms": 0,
-                    "launcher": {"provider": "isolated_chromium", "label": "隔离网页窗口"},
-                    "target": None,
-                    "updated_at": utcnow(),
-                }
-            result = self.remote_display_service_status(run_id, surface_id)
-            result["started"] = result["phase"] == "ready"
-            return result
+                    self._remote_display_start_threads[key] = thread
+                    thread.start()
+            return self._remote_display_starting_public(run_id, surface)
         target, _target_error = self.configured_vnc_target(state, surface)
         launcher = self._remote_display_launcher(target)
         if launcher is None:
@@ -16921,7 +17031,7 @@ class WorkflowWebService:
         score = 100
         if any(token in name for token in ("feedback", "contact", "support")):
             score -= 80
-        if any(token in path for token in ("/src/stores/user.ts", "/components/top/top.vue", "/gateway/api.py")):
+        if any(token in path for token in ("/src/stores/user.ts", "/components/top/top.vue", "/gateway_yeasier/api.py")):
             score -= 50
         if any(token in path for token in ("/src/", "/app/", "/gateway", "/components/", "/stores/", "/pages/")):
             score -= 40
@@ -20521,20 +20631,48 @@ class WorkflowWebService:
 
     @staticmethod
     def _infer_trial_sandbox_focus(description: str) -> dict[str, Any]:
-        """Normalize a participant's feature-trial request.
-
-        The participant is asking to try a feature, not asking the UI to guess
-        a route or synthesize a hidden application state.  Legacy field names
-        remain in the response for stored-record compatibility.
-        """
+        """Normalize a participant's feature-trial jump request."""
         text = re.sub(r"\s+", " ", str(description or "")).strip()
         return {
             "route": "/",
             "label_zh": text[:1_200],
             "label_en": text[:1_200],
-            "preparation_kind": "feature_trial_request",
+            "preparation_kind": "trial_jump",
             "description": text[:1_200],
         }
+
+    def _plan_trial_sandbox_jump(
+        self,
+        state: dict[str, Any],
+        description: str,
+        *,
+        english: bool = False,
+    ) -> dict[str, Any]:
+        focus = self._infer_trial_sandbox_focus(description)
+        guidance = self._owner_feature_verify_guidance(description, english=english)
+        declared_routes: list[str] = []
+        twin = workflow_agent.experience_twin_from_state(state)
+        for view in (twin or {}).get("views") or []:
+            if not isinstance(view, dict):
+                continue
+            route = str(view.get("route") or "").strip() or "/"
+            if route not in declared_routes:
+                declared_routes.append(route)
+        focus["route"] = self._choose_declared_trial_route(description, declared_routes)
+        focus["trial_seed"] = self._normalize_owner_trial_seed(guidance.get("trial_seed"))
+        focus["howto"] = str(guidance.get("howto") or "")[:500]
+        return focus
+
+    @staticmethod
+    def _choose_declared_trial_route(description: str, routes: list[str]) -> str:
+        blob = str(description or "").casefold()
+        chosen = "/"
+        for route in routes:
+            token = str(route or "").strip().strip("/").casefold()
+            if token and token in blob:
+                chosen = str(route).strip() or "/"
+                break
+        return chosen or "/"
 
     def configure_trial_sandbox(
         self,
@@ -20543,12 +20681,32 @@ class WorkflowWebService:
         description: str,
         locale: str = "zh-CN",
     ) -> dict[str, Any]:
-        """Forward a participant's feature-trial request to the developer agent."""
+        """Prepare temporary trial state and jump to the requested feature."""
 
-        focus = self._infer_trial_sandbox_focus(description)
+        english = self._normalize_ui_locale(locale) == "en"
+        with self.run_lock(run_id):
+            state = self.load_app_state(run_id)
+            focus = self._plan_trial_sandbox_jump(state, description, english=english)
         if not focus["description"]:
             raise APIError(HTTPStatus.BAD_REQUEST, "empty_description", "请填写要试用的功能")
-        english = self._normalize_ui_locale(locale) == "en"
+        jumped = False
+        jump_error = ""
+        try:
+            surfaces = self.remote_experience_surfaces(state)
+            surface = next((item for item in surfaces if self._is_isolated_web_surface(item)), None)
+            if surface is None and surfaces:
+                surface = surfaces[0]
+            if surface is not None:
+                runtime = None
+                with self._surface_runtime_lock:
+                    runtime = self._surface_runtimes.get((run_id, str(surface.get("id") or "")))
+                if runtime is not None:
+                    base = str(getattr(runtime.config, "url", "") or "")
+                    target = urllib.parse.urljoin(base if base.endswith("/") else base + "/", str(focus["route"] or "/").lstrip("/"))
+                    runtime.navigate_trial(target, focus.get("trial_seed"))
+                    jumped = True
+        except Exception as exc:
+            jump_error = str(exc)[:240]
         with self.run_lock(run_id):
             state = self.load_app_state(run_id)
             focus_id = "trial-focus-" + uuid.uuid4().hex[:12]
@@ -20561,7 +20719,10 @@ class WorkflowWebService:
                 "label_zh": focus["label_zh"],
                 "label_en": focus["label_en"],
                 "preparation_kind": focus["preparation_kind"],
-                "status": "queued",
+                "trial_seed": dict(focus.get("trial_seed") or {}),
+                "howto": str(focus.get("howto") or "")[:500],
+                "status": "jumped" if jumped else "queued",
+                "jumped": jumped,
                 "sandbox": False,
                 "created_at": now,
                 "updated_at": now,
@@ -20575,18 +20736,18 @@ class WorkflowWebService:
             state["trial_sandbox_focus_history"] = history[-20:]
             if english:
                 body = (
-                    "[Participant feature-trial request]\n"
-                    f"The participant wants to try: {focus['description']}\n"
-                    "Check that this feature is directly usable in the current trial window. "
-                    "If it is incomplete, prioritize the smallest safe improvement and report progress in the Develop conversation. "
-                    "Use synthetic/test data only. This is trial guidance, not a release decision."
+                    "[Owner trial jump]\n"
+                    f"The owner wants to try: {focus['description']}\n"
+                    "In the already-open trial window only: prepare temporary synthetic state "
+                    "(for example add one deletable item before a delete trial) and jump to that screen. "
+                    "Do not change source code and do not start a new development round."
                 )
             else:
                 body = (
-                    "【受试者功能试用请求】\n"
-                    f"受试者想试用：{focus['description']}\n"
-                    "请确认当前试用窗口可以直接使用该功能；如果尚未完整支持，优先完成最小且安全的优化，并在研发对话中汇报进展。"
-                    "仅使用虚构/测试数据。这是试用引导，不是发布决定。"
+                    "【所有者试用跳转】\n"
+                    f"所有者想试用：{focus['description']}\n"
+                    "只在当前已打开的试用窗口中准备临时状态（例如删除功能先放入一条可删条目），并跳转到对应界面。"
+                    "不要改源码，不要开启新的研发轮次。"
                 )
             workflow_agent.event(
                 state,
@@ -20613,21 +20774,26 @@ class WorkflowWebService:
                 "trial_focus",
                 persist_focus,
             )
-        self.submit_message(
-            run_id,
-            {
-                "text": body,
-                "channel": "main",
-                "mention_target": "developer",
-                "client_request_id": f"trial-sandbox-{focus_id}",
-            },
-        )
+        message_queued = False
+        if not jumped:
+            self.submit_message(
+                run_id,
+                {
+                    "text": body,
+                    "channel": "main",
+                    "mention_target": "developer",
+                    "client_request_id": f"trial-sandbox-{focus_id}",
+                },
+            )
+            message_queued = True
         with self.run_lock(run_id):
             state = self.load_app_state(run_id)
             record = dict(state.get("trial_sandbox_focus") or record)
         return {
             "focus": record,
-            "message_queued": True,
+            "message_queued": message_queued,
+            "jumped": jumped,
+            "jump_error": jump_error,
             "owner_proxy_pending": False,
         }
 
@@ -27109,6 +27275,7 @@ def _legacy_main(argv: list[str] | None = None) -> int:
             Path(args.private_config),
         )
         service.purge_all_stale_remote_experience_sessions()
+        service.warm_remote_display_services()
         server = WorkflowHTTPServer((args.host, args.port), service)
     except (OSError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -27181,6 +27348,7 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.private_config),
         )
         purged_sessions = service.purge_all_stale_remote_experience_sessions()
+        service.warm_remote_display_services()
         server = WorkflowHTTPServer((args.host, args.port), service, trusted_local=True)
         # Even without Funnel, keep the target application on an untrusted
         # origin. With Funnel this is also its authenticated upstream; in

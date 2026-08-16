@@ -832,6 +832,63 @@ class BrowserSurfaceRuntime:
             time.sleep(0.1)
         raise SurfaceRuntimeError("The Web surface did not finish its initial navigation")
 
+    def navigate_trial(self, url: str, seed: dict[str, Any] | None = None) -> None:
+        """Jump the live trial page and optionally seed temporary local data."""
+
+        target = str(url or "").strip()
+        if not target:
+            raise SurfaceRuntimeError("trial jump url is empty")
+        cdp = self._cdp
+        if cdp is None:
+            raise SurfaceRuntimeError("The isolated browser is not connected")
+        navigation = cdp.call("Page.navigate", {"url": target})
+        navigation_error = str(navigation.get("errorText") or "").strip()
+        if navigation_error:
+            raise SurfaceRuntimeError("目标应用无法跳转：" + navigation_error[:240])
+        deadline = time.monotonic() + 12.0
+        while time.monotonic() < deadline:
+            ready = cdp.call(
+                "Runtime.evaluate",
+                {"expression": "document.readyState", "returnByValue": True},
+            )
+            value = ((ready.get("result") or {}).get("value"))
+            if value in {"interactive", "complete"}:
+                break
+            time.sleep(0.1)
+        payload = seed if isinstance(seed, dict) else {}
+        expression = (
+            "(() => { const seed = "
+            + json.dumps(payload, ensure_ascii=True)
+            + "; try {"
+            " const need = Math.max(0, Math.min(5, Number(seed.ensure_logs || 0)));"
+            " const keys = [];"
+            " try { for (let i = 0; i < localStorage.length; i += 1) keys.push(localStorage.key(i) || ''); } catch (_e) {}"
+            " const preferred = String(seed.storage_key || '');"
+            " const chosen = preferred && keys.includes(preferred) ? preferred : (keys[0] || preferred);"
+            " if (chosen && need > 0) {"
+            "   let raw = {}; try { raw = JSON.parse(localStorage.getItem(chosen) || '{}') || {}; } catch (_e2) { raw = {}; }"
+            "   const today = new Date().toISOString().slice(0, 10);"
+            "   if (raw.days && typeof raw.days === 'object') {"
+            "     let day = raw.days[today]; if (!day || typeof day !== 'object') day = {count:0,logs:[],goal:8};"
+            "     if (!Array.isArray(day.logs)) day.logs = [];"
+            "     while (day.logs.length < need) day.logs.push({time:'12:00',ts:Date.now()-day.logs.length*60000});"
+            "     day.count = Math.max(Number(day.count||0), day.logs.length); raw.days[today] = day;"
+            "   } else {"
+            "     const listKey = ['items','todos','tasks','records','list'].find((name) => Array.isArray(raw[name]));"
+            "     if (listKey) {"
+            "       while (raw[listKey].length < need) raw[listKey].push({id:'trial-'+Date.now(), title:'Trial item', name:'Trial item', text:'Trial item'});"
+            "     } else if (Array.isArray(raw)) {"
+            "       while (raw.length < need) raw.push({id:'trial-'+Date.now(), title:'Trial item'});"
+            "     }"
+            "   }"
+            "   localStorage.setItem(chosen, JSON.stringify(raw));"
+            " }"
+            " const id = String(seed.focus_id || '');"
+            " if (id) { const node = document.getElementById(id); if (node) { try { node.scrollIntoView({block:'center'}); } catch (_e3) {} } }"
+            "} catch (_err) {} return true; })()"
+        )
+        cdp.call("Runtime.evaluate", {"expression": expression, "returnByValue": True})
+
     def _page_health_snapshot(self) -> dict[str, Any]:
         """Return public page health without exposing page content or secrets."""
 
