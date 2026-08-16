@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AppLooper">
+  <defs>
+    <linearGradient id="applooper-blue" x1="56" y1="40" x2="456" y2="472" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3b7bff"/>
+      <stop offset="0.52" stop-color="#2864ed"/>
+      <stop offset="1" stop-color="#1747c7"/>
+    </linearGradient>
+    <linearGradient id="applooper-face" x1="150" y1="318" x2="414" y2="506" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eaf2ff"/>
+    </linearGradient>
+    <filter id="wave-shadow" x="-15%" y="-25%" width="130%" height="150%">
+      <feDropShadow dx="0" dy="-7" stdDeviation="9" flood-color="#0b378f" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#applooper-blue)"/>
+  <path
+    d="M0 431C97 373 198 311 305 268c85-34 151-38 207-7v251H0V431Z"
+    fill="url(#applooper-face)"
+    filter="url(#wave-shadow)"
+  />
+  <path d="M0 431C97 373 198 311 305 268c85-34 151-38 207-7" fill="none" stroke="#d8e6ff" stroke-width="7"/>
+  <ellipse cx="350" cy="359" rx="18" ry="25" transform="rotate(12 350 359)" fill="#163b87"/>
+  <ellipse cx="430" cy="379" rx="18" ry="25" transform="rotate(12 430 379)" fill="#163b87"/>
+  <ellipse cx="344" cy="351" rx="5" ry="7" transform="rotate(12 344 351)" fill="#ffffff" fill-opacity="0.72"/>
+  <ellipse cx="424" cy="371" rx="5" ry="7" transform="rotate(12 424 371)" fill="#ffffff" fill-opacity="0.72"/>
+</svg>

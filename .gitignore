@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local secrets and machine config
+# config.yaml is committed with empty fields. Do not commit filled keys.
+.env
+.env.*
+!.env.example
+private.local.json
+*.local.json
+*.local.yaml
+*.local.yml
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Workspaces created by the local agent
+workspaces/
+projects/
+runtime/
+logs/
+uploads/
+data/
+*.log
+*.pid
+*.sqlite
+*.sqlite3
+*.db
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

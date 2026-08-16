@@ -1,0 +1,35 @@
+{
+  "id": "/",
+  "name": "AppLooper",
+  "short_name": "AppLooper",
+  "description": "集中查看应用开发进度、体验反馈并与研发智能体沟通。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f6f8",
+  "theme_color": "#f7f8fa",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "打开应用列表",
+      "short_name": "应用列表",
+      "url": "./"
+    }
+  ]
+}
