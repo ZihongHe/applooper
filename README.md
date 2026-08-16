@@ -1,14 +1,10 @@
 # AppLooper
 
-AppLooper is a **localhost** web agent that builds and iterates applications in a folder on your own machine. You choose a workspace (a new folder or an existing project). The sidebar lets you add as many apps as you want. Each app uses the AppLooper multi-agent workflow: developer, virtual user, test, and owner-intent.
+AppLooper is a localhost web agent that builds and iterates applications in a folder on your own machine. You choose a workspace (a new folder or an existing project). The sidebar lets you add as many apps as you want. Each app uses the AppLooper multi-agent workflow: developer, virtual user, test, and owner-intent.
 
-This package is for self-hosted use on `127.0.0.1` only.
+This package is for self-hosted use on `127.0.0.1` only. Put secrets only in `config.yaml` and do not commit filled keys.
 
-## 中文简介
-
-AppLooper 是运行在本机的网页智能体：你指定一个本地工作区（从零开始或已有软件），在左侧栏添加应用，智能体在该文件夹里开发、试用和迭代。发布页可以下载当前应用的源码包。密钥只写在 `config.yaml`，不要提交到 Git。
-
-## Prerequisites / 环境要求
+## Prerequisites
 
 - Python 3.11 or newer
 - A local coding CLI used by the developer agent:
@@ -16,7 +12,7 @@ AppLooper 是运行在本机的网页智能体：你指定一个本地工作区�
   - Codex CLI
 - An API key for at least one LLM provider (Agnes AI, Anthropic Claude, or OpenRouter)
 
-## Setup / 安装
+## Setup
 
 ```bash
 git clone https://github.com/ZihongHe/applooper.git
@@ -38,9 +34,9 @@ Copy-Item config.example.yaml config.yaml
 cp config.example.yaml config.yaml
 ```
 
-The repository also ships an empty `config.yaml`. Fill in **your own** keys. Never commit a filled file.
+The repository also ships an empty `config.yaml`. Fill in your own keys. Never commit a filled file.
 
-## Fill config.yaml / 填写密钥
+## Fill config.yaml
 
 Edit `config.yaml`:
 
@@ -70,7 +66,7 @@ Leave unused key fields empty. `run.py` exports keys to environment variables (`
 
 You can also pass `--projects-dir` when starting, which overrides the config value.
 
-## Start / 启动
+## Start
 
 ```bash
 python run.py
@@ -85,9 +81,9 @@ python run.py --projects-dir "D:\apps"
 python run.py --port 8765
 ```
 
-## Choose or create a workspace / 选择工作区
+## Choose or create a workspace
 
-1. Click **新建 / New** in the left sidebar.
+1. Click **New** in the left sidebar.
 2. Enter audience, app type, and description.
 3. Choose Claude Code or Codex (whichever is installed on this machine).
 4. Set **Workspace** to an existing project folder, or browse and create a new folder.
@@ -95,23 +91,23 @@ python run.py --port 8765
 
 You can add unlimited apps. Each app has its own workspace path.
 
-## Add apps / 添加应用
+## Add apps
 
-The left sidebar lists every app on this machine. Use **新建** as many times as you need. There is no app cap.
+The left sidebar lists every app on this machine. Use **New** as many times as you need. There is no app cap.
 
-## Download the package / 下载应用包
+## Download the package
 
-Open an app, go to the **发布 / Publish** tab, and click **下载应用包**. This calls `/api/apps/{id}/source-export` and downloads a zip of the current app source with secret values removed.
+Open an app, go to the **Publish** tab, and click **Download package**. This calls `/api/apps/{id}/source-export` and downloads a zip of the current app source with secret values removed.
 
-## Secrets / 密钥安全
+## Secrets
 
 - Put keys only in `config.yaml`.
 - Do not commit a filled `config.yaml`, `.env`, or `private.local.json`.
-- `.gitignore` already ignores `config.yaml`, `.env`, `workspaces/`, and `*.key`.
+- `.gitignore` ignores `.env`, `workspaces/`, and `*.key`. `config.yaml` is committed with empty fields; do not commit filled keys.
 - Before you commit, confirm `git status` does not list a filled config.
 - `config.example.yaml` is the safe template to share.
 
-## License / 许可
+## License
 
 Personal and non-commercial use (including public-interest, educational, and non-profit use) is unrestricted.
 
