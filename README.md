@@ -10,7 +10,7 @@ This package is for self-hosted use on `127.0.0.1` only. Put secrets only in `co
 - A local coding CLI used by the developer agent:
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code), or
   - Codex CLI
-- An API key for at least one LLM provider (Agnes AI, Anthropic Claude, or OpenRouter)
+- An API key for an LLM provider. Agnes AI, Anthropic Claude, and OpenRouter are included as examples; other OpenAI-compatible or Anthropic-compatible endpoints can be added in `config.yaml`
 
 ## Setup
 
@@ -46,11 +46,13 @@ port: 8765
 projects_dir: ./workspaces   # or an absolute local folder
 
 llm:
-  provider: ""          # agnes | claude | openrouter
+  provider: ""          # agnes | claude | openrouter | custom
   agnes_api_key: ""
   agnes_base_url: "https://api.agnes-ai.cn/v1"
   anthropic_api_key: ""
   openrouter_api_key: ""
+  api_key: ""           # generic key for another provider
+  base_url: ""          # OpenAI-compatible or Anthropic-compatible endpoint
   model: ""
 ```
 
@@ -59,8 +61,9 @@ llm:
 | Agnes AI | `provider: agnes`, `agnes_api_key`, optional `model` | Uses `agnes_base_url` |
 | Claude (Anthropic) | `provider: claude`, `anthropic_api_key`, optional `model` | Official Anthropic API |
 | OpenRouter | `provider: openrouter`, `openrouter_api_key`, optional `model` | Routed through OpenRouter |
+| Other LLM | `provider: custom`, `api_key`, `base_url`, optional `model` | Any OpenAI-compatible or Anthropic-compatible endpoint |
 
-Leave unused key fields empty. `run.py` exports keys to environment variables (`AGNES_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, and `ANTHROPIC_BASE_URL` when needed). It never prints secret values.
+These three named providers are examples, not a closed list. To add another service, set `provider: custom` and fill `api_key` plus `base_url`. Leave unused key fields empty. `run.py` exports keys to environment variables (`AGNES_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_BASE_URL` when needed). It never prints secret values.
 
 `projects_dir` is the parent folder for workspaces. Use `./workspaces` or an absolute path such as `C:\Users\you\Documents\my-apps`.
 
