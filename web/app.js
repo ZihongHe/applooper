@@ -7237,23 +7237,10 @@
     return firstText(app?.id, app?.app_id, app?.run_id, app?.workflow_id);
   }
 
-  function appWorkflowType(app) {
-    const stable = firstText(app?.workflow_type, app?.workflowType).trim().toUpperCase();
-    if (/^[AB]$/.test(stable)) return stable;
-    const legacy = firstText(app?.name, app?.title);
-    const match = legacy.match(/^\s*(?:流程类型|Workflow\s+Type)\s*([AB])\s*[·•|]\s*/i);
-    return match ? match[1].toUpperCase() : "";
-  }
-
-  function legacyWorkflowAppType(app) {
-    const legacy = firstText(app?.name, app?.title);
-    const match = legacy.match(/^\s*(?:流程类型|Workflow\s+Type)\s*[AB]\s*[·•|]\s*(.+?)\s*$/i);
-    return firstText(match?.[1]);
-  }
-
   function appTitle(app) {
     const title = localizedFirstField(app, ["name", "title", "app_type", "type"]);
-    if (title) return title;
+    const cleaned = String(title || "").replace(/^\s*(?:流程类型|Workflow\s+Type)\s*[AB]\s*[·•|]\s*/i, "").trim();
+    if (cleaned) return cleaned;
     const intent = localizedFirstField(app, ["intent", "needs", "summary"]);
     if (intent) return intent.length > 34 ? `${intent.slice(0, 34)}…` : intent;
     return appId(app) || t("apps.unnamed");
@@ -7281,30 +7268,8 @@
     return `${state.currentId}\u0000${rows}`;
   }
 
-  function studyAppSortLetter(app, index = 0) {
-    const typed = appWorkflowType(app);
-    if (typed === "A" || typed === "B") return typed;
-    const title = appTitle(app);
-    if (/流程类型\s*B|Workflow Type B/i.test(title)) return "B";
-    if (/流程类型\s*A|Workflow Type A/i.test(title)) return "A";
-    return index === 0 ? "A" : "B";
-  }
-
   function sortedStudyApps(apps = state.apps) {
-    const rows = Array.isArray(apps) ? apps.slice() : [];
-    const hasStudyPair = rows.some((app) => {
-      const letter = studyAppSortLetter(app);
-      return letter === "A" || letter === "B";
-    });
-    if (!hasStudyPair) return rows;
-    return rows.sort((left, right) => {
-      const leftLetter = studyAppSortLetter(left, 0);
-      const rightLetter = studyAppSortLetter(right, 1);
-      if (leftLetter === rightLetter) return String(appId(left) || "").localeCompare(String(appId(right) || ""));
-      if (leftLetter === "A") return -1;
-      if (rightLetter === "A") return 1;
-      return String(appId(left) || "").localeCompare(String(appId(right) || ""));
-    });
+    return Array.isArray(apps) ? apps.slice() : [];
   }
 
   function renderAppList() {

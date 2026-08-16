@@ -2590,20 +2590,15 @@ def requested_experience_surfaces(state: dict[str, Any]) -> set[str]:
 
 
 def paired_study_default_web_views_enabled(state: dict[str, Any]) -> bool:
-    """Whether the participant study must always expose desktop and mobile Web.
+    """Whether this workflow should expose both desktop and mobile Web views."""
 
-    The paired CHI study compares orchestration, not device coverage.  Both
-    conditions therefore receive the same two responsive browser surfaces by
-    default, even when an older developer result only declared one of them.
-    """
-
-    return str(state.get("study_condition") or "").strip() in STUDY_CONDITION_KEYS
+    return True
 
 
 def ensure_paired_study_default_web_views(
     state: dict[str, Any], twin: dict[str, Any]
 ) -> dict[str, Any]:
-    """Backfill the paired study's two default Web views without losing state."""
+    """Keep desktop and mobile Web views available without dropping existing state."""
 
     if not paired_study_default_web_views_enabled(state):
         return twin
@@ -23691,12 +23686,10 @@ def release_agent_satisfaction(
     unresolved_feedback: list[Any],
     p0_count: int,
 ) -> dict[str, Any]:
-    """Aggregate agent satisfaction used as the study release gate.
+    """Aggregate agent satisfaction used as the local release gate.
 
-    Claude Code Loop freezes when the developer agent judges the app suitable
-    for release. AppLooper additionally requires virtual users and the test
-    agent; the owner-intent agent votes only when the owner actually gave
-    feedback.
+    The developer, virtual-user, and test agents must agree the app is ready.
+    The owner-intent agent votes only when the owner actually gave feedback.
     """
 
     multi = study_multi_agent_treatment_enabled(state)
