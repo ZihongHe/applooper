@@ -43,7 +43,7 @@ def load_config(path: Path) -> dict:
 
 
 def apply_llm_env(llm: dict) -> None:
-    """Export provider keys to the process environment without printing them."""
+    """Export named or custom provider keys to the environment without printing them."""
 
     if not isinstance(llm, dict):
         return
@@ -53,6 +53,8 @@ def apply_llm_env(llm: dict) -> None:
         "ANTHROPIC_API_KEY": str(llm.get("anthropic_api_key") or "").strip(),
         "OPENROUTER_API_KEY": str(llm.get("openrouter_api_key") or "").strip(),
     }
+    generic_key = str(llm.get("api_key") or "").strip()
+    generic_base = str(llm.get("base_url") or "").strip()
     for name, value in mapping.items():
         if value and name not in os.environ:
             os.environ[name] = value
@@ -64,6 +66,13 @@ def apply_llm_env(llm: dict) -> None:
             os.environ["AGNES_BASE_URL"] = agnes_base
     if provider == "openrouter" and "ANTHROPIC_BASE_URL" not in os.environ:
         os.environ["ANTHROPIC_BASE_URL"] = "https://openrouter.ai/api/v1"
+    if generic_key:
+        if "ANTHROPIC_API_KEY" not in os.environ:
+            os.environ["ANTHROPIC_API_KEY"] = generic_key
+        if "ANTHROPIC_AUTH_TOKEN" not in os.environ:
+            os.environ["ANTHROPIC_AUTH_TOKEN"] = generic_key
+    if generic_base and "ANTHROPIC_BASE_URL" not in os.environ:
+        os.environ["ANTHROPIC_BASE_URL"] = generic_base
 
     model = str(llm.get("model") or "").strip()
     if model and "WF_MODEL" not in os.environ:
