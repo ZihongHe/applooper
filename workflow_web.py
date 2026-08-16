@@ -6037,17 +6037,15 @@ class WorkflowWebService:
                 app_type = app_type or match.group("app_type").strip()
                 needs = needs or match.group("needs").strip()
         legacy_name = str(record.get("name") or "").strip()
-        workflow_type = str(record.get("workflow_type") or "").strip().upper()
+        workflow_type = ""
         workflow_app_label = str(record.get("workflow_app_label") or "").strip()
         legacy_workflow_match = re.fullmatch(
-            r"\s*(?:流程类型|Workflow\s+Type)\s*([AB])\s*[·•|]\s*(.+?)\s*",
+            r"\s*(?:流程类型|Workflow\s+Type)\s*[AB]\s*[·•|]\s*(.+?)\s*",
             legacy_name,
             re.I | re.S,
         )
-        if workflow_type not in {"A", "B"} and legacy_workflow_match:
-            workflow_type = legacy_workflow_match.group(1).upper()
         if not workflow_app_label and legacy_workflow_match:
-            workflow_app_label = legacy_workflow_match.group(2).strip()
+            workflow_app_label = legacy_workflow_match.group(1).strip()
         app_type_i18n = _canonical_dynamic_pair(
             app_type,
             record.get("app_type_i18n"),
@@ -6056,35 +6054,29 @@ class WorkflowWebService:
             workflow_app_label or app_type,
             record.get("workflow_app_label_i18n"),
         )
-        if workflow_type in {"A", "B"}:
-            zh_app_label = (
-                workflow_app_label_i18n[app_i18n.ZH]
-                or workflow_app_label_i18n[app_i18n.EN]
-                or "应用"
-            )
-            en_app_label = workflow_app_label_i18n[app_i18n.EN] or "Application"
-            name_i18n = app_i18n.pair(
-                f"流程类型 {workflow_type} · {zh_app_label}",
-                f"Workflow Type {workflow_type} · {en_app_label}",
-            )
-            workflow_type_i18n = app_i18n.pair(
-                f"流程类型 {workflow_type}",
-                f"Workflow Type {workflow_type}",
-            )
-        else:
-            fallback_name = legacy_name or (
+        fallback_name = (
+            workflow_app_label
+            or re.sub(
+                r"^\s*(?:流程类型|Workflow\s+Type)\s*[AB]\s*[·•|]\s*",
+                "",
+                legacy_name,
+                flags=re.I,
+            ).strip()
+            or legacy_name
+            or (
                 (app_type if app_type.endswith("应用") else f"{app_type}应用")
                 if app_type else "未命名应用"
             )
-            fallback_pair = _canonical_dynamic_pair(
-                fallback_name,
-                record.get("name_i18n"),
-            )
-            name_i18n = app_i18n.pair(
-                fallback_pair[app_i18n.ZH] or fallback_pair[app_i18n.EN] or "未命名应用",
-                fallback_pair[app_i18n.EN] or "Unnamed application",
-            )
-            workflow_type_i18n = app_i18n.pair("", "")
+        )
+        fallback_pair = _canonical_dynamic_pair(
+            fallback_name,
+            record.get("name_i18n"),
+        )
+        name_i18n = app_i18n.pair(
+            fallback_pair[app_i18n.ZH] or fallback_pair[app_i18n.EN] or "未命名应用",
+            fallback_pair[app_i18n.EN] or "Unnamed application",
+        )
+        workflow_type_i18n = app_i18n.pair("", "")
         locale = self._dynamic_locale(state)
         name = app_i18n.resolve(name_i18n, locale)
         workspace = str(state.get("workspace") or "")
