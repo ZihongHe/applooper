@@ -161,38 +161,6 @@ CATALOG: dict[str, dict[str, str]] = {
         "使用恢复操作创建新的执行会话并继续当前阶段",
         "Use Resume to create a fresh execution session and continue this stage",
     ),
-    "study.stage.initializing": pair(
-        "系统正在为你初始化流程类型 A 与流程类型 B。",
-        "The system is initializing Workflow Type A and Workflow Type B.",
-    ),
-    "study.stage.initialization_failed": pair(
-        "账号已创建，但工作流初始化暂未完成；系统正在重试。",
-        "The account was created, but workflow initialization is still retrying.",
-    ),
-    "study.stage.own_acceptance": pair(
-        "两种流程类型均已可验收。请依次试用、通过或退回，并完成发布。",
-        "Both workflow types are ready for acceptance. Try each, approve or return it, and publish.",
-    ),
-    "study.stage.own_pair_comparison": pair(
-        "两个应用均已发布，请分别试用并完成 A/B 对照问卷。",
-        "Both apps are published. Try each and complete the A/B comparison survey.",
-    ),
-    "study.stage.waiting_for_peers": pair(
-        "自己的流程已完成；正在等待两位符合条件的同伴项目。",
-        "Your workflows are complete; waiting for two eligible peer projects.",
-    ),
-    "study.stage.peer_review": pair(
-        "请依次体验两个同伴项目的四个匿名应用，并完成每组比较。",
-        "Try four anonymized apps across two peer projects and complete each comparison.",
-    ),
-    "study.stage.final_questionnaire": pair(
-        "四个同伴应用均已体验并完成比较，请提交最终问卷。",
-        "All four peer apps have been experienced and compared. Submit the final questionnaire.",
-    ),
-    "study.stage.completed": pair(
-        "研究流程已完成。请导出你构建的用户应用，并按页面提示领取报酬。",
-        "The study is complete. Export your apps and follow the page instructions for compensation.",
-    ),
     "study.progress.no_reply": pair(
         "查看进展详情",
         "View progress details",

@@ -23,7 +23,10 @@
   const OPERATIONS_SKILL_GENERATE_POLL_MS = 2_500;
   const OPERATIONS_SKILL_GENERATE_MAX_WAIT_MS = 600_000;
   const NOTIFICATION_PERMISSION_TIMEOUT_MS = 30_000;
-  const SERVICE_WORKER_VERSION = "202";
+  const SERVICE_WORKER_VERSION = "209";
+  const REMOTE_TRIAL_SESSION_TIMEOUT_MS = 45_000;
+  const RELEASE_VERIFY_MIN_OPERATIONS = 2;
+  const RELEASE_VERIFY_MIN_DWELL_MS = 20_000;
   const AGENT_AVATAR_ROOT = "./vendor/agent-avatars";
   const AGENT_AVATAR_SOURCES = Object.freeze({
     developer: `${AGENT_AVATAR_ROOT}/development.png`,
@@ -59,6 +62,25 @@
   function studyHideProjectManagerAgent() { return true; }
   function studyShowRepositoryManagement() { return false; }
   function usesAppLooperStudyTreatment() { return true; }
+
+  function participantFacingReviewTitle(value) {
+    const original = String(value || "").trim();
+    if (!original || !usesDirectDeveloperStudyConversation()) return original;
+    const cleaned = original
+      .replace(/\bP[0-3]\b/gi, " ")
+      .replace(/含\s*P[0-3]/gi, " ")
+      .replace(/快速闭环/g, " ")
+      .replace(/端口验证/g, " ")
+      .replace(/无凭据/g, " ")
+      .replace(/no[ -]?credentials?/gi, " ")
+      .replace(/manifest[ -]?only(?:\s*AI)?/gi, " ")
+      .replace(/\b(?:candidate|feedback|scenario|virtual_replay):[^\s·]+/gi, " ")
+      .replace(/\s+/g, " ")
+      .replace(/[、,;；]{2,}/g, "、")
+      .replace(/^[、,;；\s]+|[、,;；\s]+$/g, "")
+      .trim();
+    return cleaned || original;
+  }
 
   function clearExplicitStudyWorkflowChoice() {
     try {
@@ -247,7 +269,12 @@
       "twin.sandbox_placeholder": "例如：我要试用一句话记录功能",
       "twin.sandbox_configure": "跳转",
       "twin.sandbox_configuring": "正在准备并跳转…",
+      "twin.sandbox_connecting_jump": "正在连接试用窗口并跳转…",
       "twin.sandbox_ready": "已跳转到“{label}”，可直接在当前试用窗口操作。",
+      "twin.sandbox_not_ready": "试用窗口还没准备好，已尝试在当前窗口跳转。这不是给研发的需求。",
+      "twin.sandbox_wait_preview": "正在连接试用窗口，连接完成后会自动跳转。",
+      "twin.sandbox_busy": "应用正在更新，请稍后再跳转。",
+      "twin.sandbox_missing_target": "当前应用里还没有这个界面，所以没法跳转。请在现有页面里查找，或等研发完成后再试。",
       "twin.sandbox_failed": "跳转失败，请重试。",
       "twin.feedback_title": "向研发智能体描述需要优化的点",
       "twin.feedback_expand": "描述需要优化的点",
@@ -503,7 +530,7 @@
       "release.snapshot_no_paths": "从应用首页开始，按原始需求逐项试用核心路径。",
       "release.snapshot_scope_candidate": "本次确认只适用于当前版本；版本变化后需要重新验收。",
       "release.snapshot_scope_run": "本次确认适用于当前研发流程；上线前请确认页面仍是你刚刚检查的版本。",
-      "release.section_version": "版本主要更新",
+      "release.section_version": "发布前自验清单",
       "release.section_feedback": "用户反馈",
       "release.gate_draft": "待审查",
       "release.gate_ready": "可上线",
@@ -529,6 +556,9 @@
       "release.guide_me": "带我检查",
       "release.verify_prompt": "请按下面步骤验收「{title}」",
       "release.verify_done": "验证完毕",
+      "release.verify_need_trial": "请先在试用窗口里实际操作至少两次，或停留超过 20 秒后再点验证完毕。",
+      "release.verify_need_both_surfaces": "电脑网页端和手机网页端都要试用后再点验证完毕",
+      "release.verify_surface_hint": "电脑端和手机端都要试用",
       "release.verify_verdict_kicker": "上线前审查",
       "release.verify_verdict_title": "这项功能是否验证通过？",
       "release.verify_pass": "通过",
@@ -540,7 +570,7 @@
       "release.verdict_failed": "已验证不通过",
       "release.platform_switch_off": "关闭",
       "release.platform_switch_on": "开启",
-      "release.items_loading": "正在加载检查项…",
+      "release.items_loading": "正在加载发布前自验清单，请稍候…",
       "release.defer": "暂不上线",
       "release.defer_done": "已记录暂缓上线",
       "release.confirm_done": "发布审查已完成，可以上线",
@@ -1778,7 +1808,12 @@
       "twin.sandbox_placeholder": "For example: I want to try the one-line memory feature",
       "twin.sandbox_configure": "Jump",
       "twin.sandbox_configuring": "Preparing and jumping…",
+      "twin.sandbox_connecting_jump": "Connecting the trial window and jumping…",
       "twin.sandbox_ready": "Jumped to “{label}”. You can use it in the current trial window.",
+      "twin.sandbox_not_ready": "The trial window is not ready yet. Tried jumping in the current window. This is not an R&D request.",
+      "twin.sandbox_wait_preview": "Connecting the trial window. It will jump automatically after the screen appears.",
+      "twin.sandbox_busy": "The app is updating. Try jumping again in a moment.",
+      "twin.sandbox_missing_target": "This app does not have that screen yet, so the jump cannot be made. Look for it on the current pages, or try again after development finishes.",
       "twin.sandbox_failed": "Could not jump. Please retry.",
       "twin.feedback_title": "Describe what the developer agent should improve",
       "twin.feedback_expand": "Describe what needs improvement",
@@ -2041,7 +2076,7 @@
       "release.brief_no_screenshot": "No UI screenshot is available for this finding. Use the executable preview as the source of truth.",
       "release.evidence_disclosure": "Full evidence and technical logs (expandable)",
       "release.blocking_badge": "P0 blocks release",
-      "release.section_version": "Version updates",
+      "release.section_version": "Pre-release self-check list",
       "release.section_feedback": "User feedback",
       "release.gate_draft": "In review",
       "release.gate_ready": "Ready",
@@ -2067,6 +2102,9 @@
       "release.guide_me": "Guide me",
       "release.verify_prompt": "Follow these steps to verify “{title}”",
       "release.verify_done": "Verification done",
+      "release.verify_need_trial": "Please interact with the trial window at least twice, or stay there for more than 20 seconds, before marking verification done.",
+      "release.verify_need_both_surfaces": "Try both the desktop web and mobile web views before marking verification done.",
+      "release.verify_surface_hint": "Try both desktop and phone",
       "release.verify_verdict_kicker": "Pre-launch review",
       "release.verify_verdict_title": "Did this feature pass verification?",
       "release.verify_pass": "Pass",
@@ -2078,7 +2116,7 @@
       "release.verdict_failed": "Verified, still a problem",
       "release.platform_switch_off": "Off",
       "release.platform_switch_on": "On",
-      "release.items_loading": "Loading review items…",
+      "release.items_loading": "Loading the pre-release self-check list. Please wait…",
       "release.defer": "Not now",
       "release.defer_done": "Release deferred",
       "release.confirm_done": "Release review complete — you may deploy",
@@ -3244,6 +3282,8 @@
     operationsLoading: false,
     releaseReviewBusy: false,
     releaseVerifyPending: null,
+    releaseVerifyEngagement: { itemId: "", ops: 0, startedAt: 0, dwellTimer: 0 },
+    releaseVerifyEngagementBound: false,
     releaseScenarioSession: null,
     eufrSelectedThemeId: "",
     personaEditing: false,
@@ -3808,6 +3848,7 @@
       "experienceTwinLaser",
       "experienceTwinVerifyBubble",
       "experienceTwinVerifyCopy",
+      "experienceTwinVerifySurfaceHint",
       "experienceTwinVerifyDone",
       "releaseVerifyVerdictDialog",
       "releaseVerifyVerdictTitle",
@@ -4636,7 +4677,7 @@
     dom.replyPendingButton.addEventListener("click", focusPendingReply);
     dom.workflowActionButton.addEventListener("click", changeWorkflowState);
     [dom.mainConversationTab, dom.experienceConversationTab].forEach((button) => {
-      button?.addEventListener("click", () => setChatView(button.dataset.chatView));
+      button.addEventListener("click", () => setChatView(button.dataset.chatView));
     });
     dom.openExperienceTwinButton.addEventListener("click", openExperienceTwin);
     dom.experienceTwinTab.addEventListener("click", openExperienceTwin);
@@ -4655,9 +4696,9 @@
         void sendTrialSandboxFeedback();
       }
     });
-    dom.addExperienceSurfaceButton.addEventListener("click", openExperienceSurfaceDialog);
-    dom.launchTab?.addEventListener("click", openLaunch);
+    dom.addExperienceSurfaceButton?.addEventListener("click", openExperienceSurfaceDialog);
     dom.downloadSourceExportButton?.addEventListener("click", () => void downloadSourceExport());
+    dom.launchTab?.addEventListener("click", openLaunch);
     dom.growthTab?.addEventListener("click", openGrowth);
     dom.launchChecklistAction?.addEventListener("click", () => submitLaunchChecklistAction());
     dom.launchAutoToggle?.addEventListener("change", () => void persistLaunchAutoPolicy());
@@ -7240,8 +7281,7 @@
 
   function appTitle(app) {
     const title = localizedFirstField(app, ["name", "title", "app_type", "type"]);
-    const cleaned = String(title || "").replace(/^\s*(?:流程类型|Workflow\s+Type)\s*[AB]\s*[·•|]\s*/i, "").trim();
-    if (cleaned) return cleaned;
+    if (title) return title;
     const intent = localizedFirstField(app, ["intent", "needs", "summary"]);
     if (intent) return intent.length > 34 ? `${intent.slice(0, 34)}…` : intent;
     return appId(app) || t("apps.unnamed");
@@ -7279,7 +7319,20 @@
   }
 
   function sortedStudyApps(apps = state.apps) {
-    return Array.isArray(apps) ? apps.slice() : [];
+    const rows = Array.isArray(apps) ? apps.slice() : [];
+    const hasStudyPair = rows.some((app) => {
+      const letter = studyAppSortLetter(app);
+      return letter === "A" || letter === "B";
+    });
+    if (!hasStudyPair) return rows;
+    return rows.sort((left, right) => {
+      const leftLetter = studyAppSortLetter(left, 0);
+      const rightLetter = studyAppSortLetter(right, 1);
+      if (leftLetter === rightLetter) return String(appId(left) || "").localeCompare(String(appId(right) || ""));
+      if (leftLetter === "A") return -1;
+      if (rightLetter === "A") return 1;
+      return String(appId(left) || "").localeCompare(String(appId(right) || ""));
+    });
   }
 
   function renderAppList() {
@@ -7371,6 +7424,7 @@
     stopDeveloperSessionPolling();
     closeDialog(dom.developerSessionDialog);
     state.current = null;
+    const studyChoice = false;
     dom.appTitle.textContent = t("apps.select");
     dom.statusBadge.hidden = true;
     dom.phaseLine.hidden = true;
@@ -7760,6 +7814,44 @@
     void exitExperienceTwinFullscreen();
   }
 
+  function trialJumpErrorCode(result, error) {
+    return String(
+      result?.jump_error
+      || error?.payload?.code
+      || error?.payload?.error?.code
+      || error?.code
+      || ""
+    ).toLowerCase();
+  }
+
+  function trialJumpMissingTarget(result) {
+    const code = trialJumpErrorCode(result);
+    return code.includes("target_not_available") || result?.focus?.target_available === false;
+  }
+
+  async function ensureTrialPreviewConnected(timeoutMs = REMOTE_TRIAL_SESSION_TIMEOUT_MS) {
+    if (state.remoteExperienceConnected) return true;
+    if (!state.experienceTwinOpen) openExperienceTwin();
+    void startRemoteExperienceWithDisplayCheck();
+    const deadline = Date.now() + Math.max(4_000, Number(timeoutMs) || REMOTE_TRIAL_SESSION_TIMEOUT_MS);
+    while (Date.now() < deadline) {
+      if (state.remoteExperienceConnected) return true;
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
+    }
+    return Boolean(state.remoteExperienceConnected);
+  }
+
+  async function requestTrialSandboxConfigure(description) {
+    const path = `/apps/${encodeURIComponent(state.currentId)}/trial-sandbox/configure`;
+    const payload = { method: "POST", json: { description, locale: state.locale || "zh-CN" } };
+    try {
+      return await request(path, payload);
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 409) throw error;
+      return await request(path, payload);
+    }
+  }
+
   async function configureTrialSandboxFocus() {
     if (!state.currentId || state.trialSandboxBusy) return;
     const description = String(dom.trialSandboxInput?.value || "").trim();
@@ -7769,26 +7861,52 @@
     }
     state.trialSandboxBusy = true;
     if (dom.trialSandboxConfigureButton) dom.trialSandboxConfigureButton.disabled = true;
-    if (dom.trialSandboxStatus) dom.trialSandboxStatus.textContent = t("twin.sandbox_configuring");
+    if (dom.trialSandboxStatus) dom.trialSandboxStatus.textContent = t("twin.sandbox_connecting_jump");
     try {
-      const result = await request(`/apps/${encodeURIComponent(state.currentId)}/trial-sandbox/configure`, {
-        method: "POST",
-        json: { description, locale: state.locale || "zh-CN" },
-      });
+      await ensureTrialPreviewConnected();
+      if (dom.trialSandboxStatus) dom.trialSandboxStatus.textContent = t("twin.sandbox_configuring");
+      let result = await requestTrialSandboxConfigure(description);
+      if (!result?.jumped && trialJumpErrorCode(result).includes("trial_window_not_ready")) {
+        if (dom.trialSandboxStatus) dom.trialSandboxStatus.textContent = t("twin.sandbox_connecting_jump");
+        await ensureTrialPreviewConnected();
+        result = await requestTrialSandboxConfigure(description);
+      }
       const focus = result?.focus || {};
       state.trialSandboxFocus = focus;
-      applyTrialSandboxJump(focus);
-      if (dom.trialSandboxStatus) {
-        dom.trialSandboxStatus.textContent = t("twin.sandbox_ready", {
-          label: focus.label || focus.description || description,
-        });
+      if (trialJumpMissingTarget(result)) {
+        const missing = t("twin.sandbox_missing_target");
+        if (dom.trialSandboxStatus) dom.trialSandboxStatus.textContent = missing;
+        showToast(missing, "error", 7000);
+        return;
       }
-      showToast(t("twin.sandbox_ready", {
-        label: focus.label || focus.description || description,
-      }), "success", 5000);
+      applyTrialSandboxJump(focus);
+      if (result?.jumped) {
+        if (dom.trialSandboxStatus) {
+          dom.trialSandboxStatus.textContent = t("twin.sandbox_ready", {
+            label: focus.label || focus.description || description,
+          });
+        }
+        showToast(t("twin.sandbox_ready", {
+          label: focus.label || focus.description || description,
+        }), "success", 5000);
+      } else if (trialJumpErrorCode(result).includes("trial_window_not_ready")) {
+        const waitMessage = t("twin.sandbox_wait_preview");
+        if (dom.trialSandboxStatus) dom.trialSandboxStatus.textContent = waitMessage;
+        showToast(waitMessage, "info", 6000);
+      } else {
+        const failed = t("twin.sandbox_failed");
+        if (dom.trialSandboxStatus) dom.trialSandboxStatus.textContent = failed;
+        showToast(failed, "error", 6000);
+      }
     } catch (error) {
-      if (dom.trialSandboxStatus) dom.trialSandboxStatus.textContent = t("twin.sandbox_failed");
-      showToast(friendlyError(error, t("twin.sandbox_failed")), "error", 6000);
+      const code = trialJumpErrorCode(null, error);
+      const message = code.includes("target_not_available")
+        ? t("twin.sandbox_missing_target")
+        : Number(error?.status || 0) === 409
+          ? t("twin.sandbox_busy")
+          : t("twin.sandbox_failed");
+      if (dom.trialSandboxStatus) dom.trialSandboxStatus.textContent = message;
+      showToast(message, "error", 7000);
     } finally {
       state.trialSandboxBusy = false;
       if (dom.trialSandboxConfigureButton) dom.trialSandboxConfigureButton.disabled = false;
@@ -7801,9 +7919,13 @@
       ? focus.trial_seed
       : (focus?.trialSeed && typeof focus.trialSeed === "object" ? focus.trialSeed : {});
     openPlainReleaseReviewRoute(route, {
-      ensureLogs: seed.ensure_logs ?? seed.ensureLogs,
+      ensureLogs: seed.ensure_count ?? seed.ensure_logs ?? seed.ensureLogs,
+      ensureCount: seed.ensure_count ?? seed.ensureCount ?? seed.ensure_logs,
       focusId: seed.focus_id ?? seed.focusId,
       storageKey: seed.storage_key ?? seed.storageKey,
+      listKey: seed.list_key ?? seed.listKey,
+      records: Array.isArray(seed.records) ? seed.records : [],
+      needsPrep: seed.needs_prep ?? seed.needsPrep,
     });
     if (state.remoteExperienceConnected) {
       void reloadActiveExperienceTwinFrame();
@@ -7898,6 +8020,7 @@
     state.experienceTwinOpen = false;
     state.launchOpen = kind === "launch";
     state.growthOpen = kind === "growth";
+    if (kind === "launch") state.operationsRefreshing = true;
     // Operations tab always presents the data dashboard directly (no toggle, no ops chat).
     state.growthToolsOpen = kind === "growth";
     if (kind === "growth") {
@@ -8184,7 +8307,29 @@
     if (state.remoteExperienceStarting && state.remoteExperienceStartKey === startKey) return;
     const requestNumber = ++state.remoteExperienceSessionStartRequest;
     const previous = state.remoteExperienceSession;
-    if (!force && previous && previous.surfaceId && normalizedIdentity(previous.surfaceId) === normalizedIdentity(view.id)) {
+    if (remoteExperienceShouldJoinInFlight(previous, view, force)) {
+      state.remoteExperienceError = null;
+      if (previous?.status === "failed") {
+        state.remoteExperienceSession = {
+          ...previous,
+          status: "preparing",
+          message: "",
+        };
+      }
+      renderExperienceTwin();
+      if (remoteDisplayStartupInProgress() && !previous?.id) {
+        continueRemoteDisplayStartup(view);
+        return;
+      }
+      if (previous?.id) {
+        scheduleRemoteExperiencePoll();
+        return;
+      }
+      if (remoteDisplayStartupInProgress()) {
+        continueRemoteDisplayStartup(view);
+        return;
+      }
+    } else if (!force && previous && previous.surfaceId && normalizedIdentity(previous.surfaceId) === normalizedIdentity(view.id)) {
       if (previous.status === "ready") {
         renderExperienceTwin();
         return;
@@ -8226,7 +8371,7 @@
     try {
       const payload = await request(`/apps/${encodeURIComponent(appIdValue)}/remote-experience/sessions`, {
         method: "POST",
-        timeoutMs: 20_000,
+        timeoutMs: REMOTE_TRIAL_SESSION_TIMEOUT_MS,
         json: {
           surface_id: view.id,
           viewport: view.width && view.height ? { width: view.width, height: view.height } : null,
@@ -8377,14 +8522,18 @@
         || (
           currentSession
           && normalizedIdentity(currentSession.surfaceId) === normalizedIdentity(surfaceId)
-          && !["failed", "expired", "stopped"].includes(currentSession.status)
+          && !["expired", "stopped"].includes(currentSession.status)
         )
       ) {
         renderExperienceTwin(null);
+        if (currentSession?.status === "failed") {
+          await startRemoteExperienceSession({ force: false });
+          return;
+        }
         if (remoteExperienceNeedsPolling(currentSession)) scheduleRemoteExperiencePoll();
         return;
       }
-      await loadExperienceTwin({ force: true });
+      await startRemoteExperienceSession({ force: false });
       return;
     }
     const errorCode = firstText(
@@ -8477,6 +8626,22 @@
       state.remoteDisplayServiceBusy = false;
       renderExperienceTwin();
     }
+  }
+
+  function remoteDisplayStartupInProgress() {
+    const phase = firstText(
+      state.remoteDisplayServiceStatus?.phase,
+      state.remoteDisplayServiceStatus?.status
+    ).toLowerCase();
+    return ["starting", "connecting", "installing", "configuring"].includes(phase);
+  }
+
+  function remoteExperienceShouldJoinInFlight(previous, view, force) {
+    if (!previous || !view?.id) return false;
+    if (normalizedIdentity(previous.surfaceId) !== normalizedIdentity(view.id)) return false;
+    if (remoteExperienceNeedsPolling(previous)) return true;
+    if (!remoteDisplayStartupInProgress()) return false;
+    return force || ["preparing", "connecting", "failed", "idle", ""].includes(previous.status || "");
   }
 
   function remoteExperienceNeedsPolling(session) {
@@ -8619,9 +8784,11 @@
       copy.append(element("small", "", experienceTwinViewMeta(view)));
       button.append(copy);
       button.addEventListener("click", () => selectExperienceTwinView(view.id));
+      button.dataset.surfaceKind = experienceTwinViewKind(view);
       dom.experienceTwinViews.append(button);
     });
     syncExperienceTwinSurfaceSwitch();
+    syncReleaseVerifySurfaceNudge();
     bindSyntheticNoticeDismiss();
 
     const activeView = activeExperienceTwinView();
@@ -9578,6 +9745,7 @@
         clearRemoteExperienceRfbWatchdogs();
         state.remoteExperienceConnected = true;
         state.remoteExperienceRfbReconnectAttempts = 0;
+        noteReleaseVerifySurface();
         setRemoteExperienceKeyboardAvailability(true);
         scheduleRemoteExperiencePoll();
         window.requestAnimationFrame(() => {
@@ -9890,6 +10058,7 @@
       ) return;
       clearExperienceTwinPreviewReadiness();
       state.remoteExperienceConnected = true;
+      noteReleaseVerifySurface();
       dom.experienceTwinStage.classList.add("is-connected", "is-web-preview");
       loading.hidden = true;
       dom.experienceTwinFidelity.hidden = false;
@@ -10246,11 +10415,9 @@
     const experienceActive = !twinActive && !productActive && state.chatView === "developer";
     const validationActive = !productActive && (twinActive || state.chatView === "experience");
     dom.conversationTabs.setAttribute("aria-label", t(directDeveloperStudy ? "conversation.study_tabs_aria" : "conversation.tabs_aria"));
-    if (dom.mainConversationTab) {
-      dom.mainConversationTab.hidden = directDeveloperStudy;
-      dom.mainConversationTab.classList.toggle("is-active", mainActive);
-      dom.mainConversationTab.setAttribute("aria-selected", String(mainActive));
-    }
+    dom.mainConversationTab.hidden = directDeveloperStudy;
+    dom.mainConversationTab.classList.toggle("is-active", mainActive);
+    dom.mainConversationTab.setAttribute("aria-selected", String(mainActive));
     dom.experienceConversationTab.classList.toggle("is-active", experienceActive);
     dom.experienceConversationTab.setAttribute("aria-selected", String(experienceActive));
     dom.experienceTwinTab.classList.toggle("is-active", validationActive);
@@ -11415,11 +11582,16 @@
   }
 
   function hideReleaseVerifyBubble() {
+    stopReleaseVerifyEngagement();
+    state.releaseVerifyTriedSurfaces = [];
     const bubble = document.getElementById("experienceTwinVerifyBubble") || dom.experienceTwinVerifyBubble;
     if (bubble) {
       bubble.dataset.releaseVerifyActive = "0";
       bubble.hidden = true;
     }
+    const hint = document.getElementById("experienceTwinVerifySurfaceHint") || dom.experienceTwinVerifySurfaceHint;
+    if (hint) hint.hidden = true;
+    syncReleaseVerifySurfaceNudge();
   }
 
   function ensureReleaseVerifyBubbleHost() {
@@ -11445,11 +11617,16 @@
   }
 
   function encodeOwnerTrialSeed(seed) {
+    const records = Array.isArray(seed?.records) ? seed.records.slice(0, 8) : [];
     const payload = {
-      version: 1,
-      ensure_logs: Math.max(0, Math.min(5, Number(seed?.ensureLogs ?? 0) || 0)),
+      version: records.length ? 2 : 1,
+      ensure_logs: Math.max(0, Math.min(8, Number(seed?.ensureCount ?? seed?.ensureLogs ?? 0) || 0)),
+      ensure_count: Math.max(0, Math.min(8, Number(seed?.ensureCount ?? seed?.ensureLogs ?? 0) || 0)),
       focus_id: firstText(seed?.focusId),
       storage_key: firstText(seed?.storageKey, "hydration_app_v1"),
+      list_key: firstText(seed?.listKey),
+      records,
+      needs_prep: Boolean(seed?.needsPrep || records.length),
     };
     try {
       const json = JSON.stringify(payload);
@@ -11474,11 +11651,17 @@
       : t("release.verify_prompt", { title });
     if (done) {
       done.textContent = t("release.verify_done");
-      done.disabled = false;
       done.hidden = false;
+    }
+    const hint = document.getElementById("experienceTwinVerifySurfaceHint") || dom.experienceTwinVerifySurfaceHint;
+    if (hint) {
+      hint.textContent = t("release.verify_surface_hint");
+      hint.hidden = false;
     }
     bubble.dataset.releaseVerifyActive = "1";
     bubble.hidden = false;
+    startReleaseVerifyEngagement(item?.id);
+    syncReleaseVerifySurfaceNudge();
   }
 
   function closeReleaseVerifyVerdictDialog() {
@@ -11504,7 +11687,132 @@
     }
   }
 
+  function releaseVerifySurfaceKey(view = activeExperienceTwinView()) {
+    const kind = experienceTwinViewKind(view);
+    return kind === "desktop_web" || kind === "mobile_web" ? kind : "";
+  }
+
+  function releaseVerifyRequiredSurfaces() {
+    return new Set(
+      (state.experienceTwin?.views || [])
+        .map((view) => releaseVerifySurfaceKey(view))
+        .filter((kind) => kind === "desktop_web" || kind === "mobile_web")
+    );
+  }
+
+  function releaseVerifyBothSurfacesTried() {
+    const required = releaseVerifyRequiredSurfaces();
+    if (required.size < 2) return true;
+    const tried = new Set(state.releaseVerifyTriedSurfaces || []);
+    return [...required].every((kind) => tried.has(kind));
+  }
+
+  function noteReleaseVerifySurface(view = activeExperienceTwinView()) {
+    if (!state.releaseVerifyPending || !state.releaseVerifyEngagement?.startedAt) return;
+    if (!state.remoteExperienceConnected && !experienceTwinWebPreviewUrl(view)) return;
+    const key = releaseVerifySurfaceKey(view);
+    if (!key) return;
+    const tried = new Set(state.releaseVerifyTriedSurfaces || []);
+    tried.add(key);
+    state.releaseVerifyTriedSurfaces = Array.from(tried);
+    syncReleaseVerifyDoneButton();
+    syncReleaseVerifySurfaceNudge();
+  }
+
+  function syncReleaseVerifySurfaceNudge() {
+    const active = Boolean(state.releaseVerifyPending && state.releaseVerifyEngagement?.startedAt);
+    const tried = new Set(state.releaseVerifyTriedSurfaces || []);
+    const required = releaseVerifyRequiredSurfaces();
+    const needNudge = active && required.size >= 2;
+    dom.experienceTwinViews?.querySelectorAll(".experience-twin-view").forEach((button) => {
+      const kind = button.dataset.surfaceKind || "";
+      button.classList.toggle("needs-surface-trial", needNudge && required.has(kind) && !tried.has(kind));
+    });
+  }
+
+  function releaseVerifyEngagementSatisfied() {
+    const engagement = state.releaseVerifyEngagement;
+    if (!engagement?.startedAt) return false;
+    if (Number(engagement.ops || 0) >= RELEASE_VERIFY_MIN_OPERATIONS) return true;
+    return (Date.now() - Number(engagement.startedAt || 0)) >= RELEASE_VERIFY_MIN_DWELL_MS;
+  }
+
+  function releaseVerifyReady() {
+    return releaseVerifyEngagementSatisfied() && releaseVerifyBothSurfacesTried();
+  }
+
+  function releaseVerifyBlockReason() {
+    if (!releaseVerifyBothSurfacesTried()) return t("release.verify_need_both_surfaces");
+    if (!releaseVerifyEngagementSatisfied()) return t("release.verify_need_trial");
+    return "";
+  }
+
+  function syncReleaseVerifyDoneButton() {
+    const done = document.getElementById("experienceTwinVerifyDone") || dom.experienceTwinVerifyDone;
+    if (!done) return;
+    const ready = releaseVerifyReady();
+    done.disabled = false;
+    done.classList.toggle("is-locked", !ready);
+    done.setAttribute("aria-disabled", ready ? "false" : "true");
+    done.title = ready ? "" : releaseVerifyBlockReason();
+  }
+
+  function noteReleaseVerifyOperation() {
+    if (!state.releaseVerifyPending || !state.releaseVerifyEngagement?.startedAt) return;
+    state.releaseVerifyEngagement.ops = Number(state.releaseVerifyEngagement.ops || 0) + 1;
+    syncReleaseVerifyDoneButton();
+  }
+
+  function ensureReleaseVerifyEngagementListeners() {
+    if (state.releaseVerifyEngagementBound) return;
+    const stage = document.getElementById("experienceTwinStage") || dom.experienceTwinStage;
+    if (!stage) return;
+    const mark = () => noteReleaseVerifyOperation();
+    stage.addEventListener("pointerdown", mark, true);
+    stage.addEventListener("keydown", mark, true);
+    state.releaseVerifyEngagementBound = true;
+  }
+
+  function startReleaseVerifyEngagement(itemId) {
+    const currentId = firstText(itemId);
+    if (
+      state.releaseVerifyEngagement?.startedAt
+      && firstText(state.releaseVerifyEngagement.itemId) === currentId
+    ) {
+      syncReleaseVerifyDoneButton();
+      syncReleaseVerifySurfaceNudge();
+      return;
+    }
+    state.releaseVerifyTriedSurfaces = [];
+    if (state.releaseVerifyEngagement?.dwellTimer) {
+      window.clearInterval(state.releaseVerifyEngagement.dwellTimer);
+    }
+    state.releaseVerifyEngagement = {
+      itemId: currentId,
+      ops: 0,
+      startedAt: Date.now(),
+      dwellTimer: window.setInterval(syncReleaseVerifyDoneButton, 1_000),
+    };
+    ensureReleaseVerifyEngagementListeners();
+    if (state.remoteExperienceConnected) noteReleaseVerifySurface();
+    syncReleaseVerifyDoneButton();
+    syncReleaseVerifySurfaceNudge();
+  }
+
+  function stopReleaseVerifyEngagement() {
+    if (state.releaseVerifyEngagement?.dwellTimer) {
+      window.clearInterval(state.releaseVerifyEngagement.dwellTimer);
+    }
+    state.releaseVerifyEngagement = { itemId: "", ops: 0, startedAt: 0, dwellTimer: 0 };
+  }
+
   function finishReleaseVerifyDone() {
+    const blocked = releaseVerifyBlockReason();
+    if (blocked) {
+      showToast(blocked, "error", 7_000);
+      syncReleaseVerifySurfaceNudge();
+      return;
+    }
     const pending = state.releaseVerifyPending;
     hideReleaseVerifyBubble();
     openLaunch();
@@ -11576,7 +11884,7 @@
 
   function finalVerdictLockKey() {
     const review = currentOperations()?.releaseReview || {};
-    return `applooper:final-verdict-locked:${state.currentId || ""}:${review.candidateVersionId || ""}`;
+    return `applooper:final-verdict-locked:v2:${state.currentId || ""}:${review.candidateVersionId || ""}`;
   }
 
   function isFinalVerdictLocked() {
@@ -11676,13 +11984,36 @@
     });
   }
 
+  function finalReleaseVerdictBlockCopy() {
+    const review = currentOperations()?.releaseReview || normalizeReleaseReview(null);
+    const hasItems = Array.isArray(review?.items) && review.items.length > 0;
+    if (!hasItems || state.operationsRefreshing) return t("release.items_loading");
+    return t("release.final_verdict_hint");
+  }
+
+  function finalReleaseVerdictReady(kind) {
+    const review = currentOperations()?.releaseReview || normalizeReleaseReview(null);
+    const hasItems = Array.isArray(review?.items) && review.items.length > 0;
+    if (!hasItems || !releaseReviewAllRequiredVerdicted(review)) return false;
+    if (kind === "pass" && (review.gate === "ready" || review.gate === "released")) return false;
+    if (kind === "fail" && review.gate === "released") return false;
+    return true;
+  }
+
   async function requestFinalReleaseVerdict(kind) {
     if (!state.currentId || state.releaseReviewBusy || isFinalVerdictLocked()) return;
+    if (!finalReleaseVerdictReady(kind)) {
+      showToast(finalReleaseVerdictBlockCopy(), "info", 4000);
+      return;
+    }
     const pass = kind === "pass";
     const label = pass ? t("release.final_pass") : t("release.final_fail");
     const confirmed = await confirmFinalReleaseVerdict(label);
     if (!confirmed) return;
-    lockFinalVerdictButtons();
+    if (!finalReleaseVerdictReady(kind)) {
+      showToast(finalReleaseVerdictBlockCopy(), "info", 4000);
+      return;
+    }
     if (pass) await submitFinalReleasePass();
     else await submitFinalReleaseFail();
   }
@@ -11690,7 +12021,10 @@
   async function submitFinalReleasePass() {
     if (!state.currentId || state.releaseReviewBusy) return;
     const review = currentOperations()?.releaseReview || normalizeReleaseReview(null);
-    if (!releaseReviewAllRequiredVerdicted(review) || review.gate === "ready" || review.gate === "released") return;
+    if (!releaseReviewAllRequiredVerdicted(review) || review.gate === "ready" || review.gate === "released") {
+      showToast(finalReleaseVerdictBlockCopy(), "info", 4000);
+      return;
+    }
     state.releaseReviewBusy = true;
     renderReleaseReview(currentOperationsSnapshot() || normalizeOperations(null));
     try {
@@ -11740,7 +12074,10 @@
   async function submitFinalReleaseFail() {
     if (!state.currentId || state.releaseReviewBusy) return;
     const review = currentOperations()?.releaseReview || normalizeReleaseReview(null);
-    if (!releaseReviewAllRequiredVerdicted(review)) return;
+    if (!releaseReviewAllRequiredVerdicted(review)) {
+      showToast(finalReleaseVerdictBlockCopy(), "info", 4000);
+      return;
+    }
     state.releaseReviewBusy = true;
     renderReleaseReview(currentOperationsSnapshot() || normalizeOperations(null));
     try {
@@ -12074,9 +12411,10 @@
   }
 
   function releaseReviewAllRequiredVerdicted(review) {
-    return arrayFrom(review?.items)
-      .filter((item) => item.required && item.controlKind !== "switch")
-      .every((item) => item.ownerVerdict === "passed" || item.ownerVerdict === "failed");
+    const required = arrayFrom(review?.items)
+      .filter((item) => item.required && item.controlKind !== "switch");
+    if (!required.length) return false;
+    return required.every((item) => item.ownerVerdict === "passed" || item.ownerVerdict === "failed");
   }
 
   async function bypassOwnerProxy() {
@@ -12144,6 +12482,13 @@
 
   function renderReleaseReview(operations) {
     if (!dom.releaseReviewPanel || !dom.releaseReviewSections) return;
+    const studyActive = document.documentElement.dataset.studyTreatmentReady === "1";
+    const studyReleaseReady = document.documentElement.dataset.studyReleaseReady === "1";
+    if (studyActive && !studyReleaseReady) {
+      dom.releaseReviewPanel.hidden = true;
+      if (dom.releaseFinalVerdictPanel) dom.releaseFinalVerdictPanel.hidden = true;
+      return;
+    }
     const review = operations.releaseReview || normalizeReleaseReview(null);
     const hasItems = review.items.length > 0;
     // Only the in-flight latch shows the spinner. Do not treat a missing
@@ -12163,13 +12508,17 @@
         dom.releaseReviewGate.dataset.state = "draft";
         dom.releaseReviewGate.textContent = t("release.items_loading");
       }
-      dom.releaseReviewSections.replaceChildren(
-        element("p", "release-review-loading", t("release.items_loading"))
-      );
+      const loadingRow = element("p", "release-review-loading");
+      const spinner = element("span", "release-review-loading-spinner");
+      spinner.setAttribute("aria-hidden", "true");
+      loadingRow.append(spinner, document.createTextNode(t("release.items_loading")));
+      dom.releaseReviewSections.replaceChildren(loadingRow);
       if (dom.releaseReviewAttestationBlock) dom.releaseReviewAttestationBlock.hidden = true;
       if (dom.releaseReviewConfirmButton) dom.releaseReviewConfirmButton.disabled = true;
       if (dom.releaseReviewDeferButton) dom.releaseReviewDeferButton.disabled = true;
       if (dom.releaseReviewCommunityPublishButton) dom.releaseReviewCommunityPublishButton.hidden = true;
+      if (dom.releaseFinalPassButton) dom.releaseFinalPassButton.disabled = true;
+      if (dom.releaseFinalFailButton) dom.releaseFinalFailButton.disabled = true;
       return;
     }
 
@@ -12301,14 +12650,16 @@
         const badge = item.blocksRelease
           ? t("release.blocking_badge")
           : (item.required ? t("release.required_badge") : "");
-        const titleText = badge ? `${item.title} (${badge})` : item.title;
+        const studyReview = usesDirectDeveloperStudyConversation();
+        const titleText = badge ? `${participantFacingReviewTitle(item.title)} (${badge})` : participantFacingReviewTitle(item.title);
         copy.append(element("strong", "", titleText));
-        if (item.description) copy.append(element("small", "", item.description));
+        if (item.description) copy.append(element("small", "", participantFacingReviewTitle(item.description)));
         if (item.failNote) copy.append(element("small", "release-review-fail-note", item.failNote));
-        if (item.contextProvenance.length) {
+        if (!studyReview && item.contextProvenance.length) {
           copy.append(element("small", "release-review-item-provenance", item.contextProvenance.join(" · ")));
         }
-        const hasScenarioPrep = Boolean(item.scenarioEvidence?.setup?.preparationKind)
+        const hasScenarioPrep = !studyReview
+          && Boolean(item.scenarioEvidence?.setup?.preparationKind)
           && item.scenarioEvidence.setup.preparationKind !== "fallback_plain_route";
         if (hasScenarioPrep) {
           const preparation = item.scenarioEvidence.setup;
@@ -15768,6 +16119,11 @@
     });
   }
 
+  function isOwnerTrialJumpMessage(message) {
+    const blob = [messageTitle(message), messageText(message), messageDisplayText(message)].join("\n");
+    return blob.includes("【所有者试用跳转】") || /\[Owner trial jump\]/i.test(blob);
+  }
+
   function mainConversationMessages() {
     const messages = state.current?.messages || [];
     if (usesDirectDeveloperStudyConversation() && usesAppLooperStudyTreatment()) {
@@ -15778,6 +16134,7 @@
         (message) =>
           (isMainConversationMessage(message) || isExperienceThreadMessage(message))
           && !isStatusOnlyConversationMessage(message)
+          && !isOwnerTrialJumpMessage(message)
           && !(studyHideProjectManagerAgent() && messageActor(message) === "project_manager")
       );
     }
@@ -15785,6 +16142,7 @@
       (message) =>
         isMainConversationMessage(message)
         && !isStatusOnlyConversationMessage(message)
+        && !isOwnerTrialJumpMessage(message)
         && !(studyHideProjectManagerAgent() && messageActor(message) === "project_manager")
     );
   }
@@ -16626,12 +16984,12 @@
     }
     if (developerFeedback) {
       const personaName = experienceView && !realUserDevReply ? experiencePersonaNameForMessage(message) : "";
-      const route = realUserDevReply
-        ? t("message.real_user_reply")
-        : experienceView && personaName
-        ? t("conversation.fix_reply_to", { name: personaName })
-        : t(experienceView ? "message.experience_reply" : "message.feedback");
-      meta.append(element("span", "message-route is-feedback", route));
+      if (realUserDevReply || personaName) {
+        const route = realUserDevReply
+          ? t("message.real_user_reply")
+          : t("conversation.fix_reply_to", { name: personaName });
+        meta.append(element("span", "message-route is-feedback", route));
+      }
     } else if (realUserInsight) {
       meta.append(element("span", "message-route is-real-user", t("message.real_user_insight")));
     } else if (experienceReport) {
@@ -16808,6 +17166,11 @@
     else dom.developerSessionDialog.setAttribute("open", "");
     loadDeveloperSession({ immediate: true });
   }
+
+  window.AppLooperStudyHooks = Object.assign({}, window.AppLooperStudyHooks, {
+    openAgentStatus: openDeveloperSession,
+    loadNoVncRfb: loadNoVncRfbModule,
+  });
 
   function closeDeveloperSession() {
     stopDeveloperSessionPolling();
@@ -17712,6 +18075,7 @@
 
   function buildOwnerIntentMember() {
     return {
+      id: "owner_intent",
       _kind: "owner_intent",
       name: t("agents.owner_intent_name"),
       role: t("agents.owner_intent_role"),
@@ -17723,6 +18087,7 @@
 
   function buildInternalTestMember() {
     return {
+      id: "development-test-agent",
       _kind: "internal_test",
       name: t("agents.internal_test_name"),
       role: t("agents.internal_test_role"),
@@ -17739,7 +18104,9 @@
     const isOwnerIntent = kind === "owner_intent";
     const isInternalTest = kind === "internal_test";
     const isPersona = kind === "persona";
-    const isFixedStudyPersona = isPersona && Boolean(member?.study_profile_version);
+    const isFixedStudyPersona = isPersona && (
+      Boolean(member?.study_profile_version) || usesDirectDeveloperStudyConversation()
+    );
     const fallbackName = isProjectManager ? t("agents.project_manager_name") : isDeveloper ? t("developer.name") : isOperations ? t("operations.agent_label") : isOwnerIntent ? t("agents.owner_intent_name") : isInternalTest ? t("agents.internal_test_name") : t("agents.experience");
     const fallbackRole = isProjectManager ? t("agents.project_manager_role") : isDeveloper ? t("agents.implementation_role") : isOperations ? t("agents.operations_role") : isOwnerIntent ? t("agents.owner_intent_role") : isInternalTest ? t("agents.internal_test_role") : t("agents.experience_role");
     const name = isPersona
@@ -17784,8 +18151,12 @@
       ? "project_manager"
       : isDeveloper
       ? "developer"
+      : isInternalTest
+      ? firstText(member?.id, "development-test-agent")
+      : isOwnerIntent
+      ? firstText(member?.id, "owner_intent")
       : firstText(member?.id, member?.persona_id, member?.personaId);
-    if (isProjectManager || isDeveloper || isOperations || agentId) {
+    if (isProjectManager || isDeveloper || isOperations || isInternalTest || isOwnerIntent || agentId) {
       const statusButton = element(
         "button",
         "member-status-button",
@@ -18056,7 +18427,9 @@
     const isOwnerIntent = member._kind === "owner_intent";
     const isInternalTest = member._kind === "internal_test";
     const isPersona = member._kind === "persona";
-    const isFixedStudyPersona = isPersona && Boolean(member.study_profile_version);
+    const isFixedStudyPersona = isPersona && (
+      Boolean(member.study_profile_version) || usesDirectDeveloperStudyConversation()
+    );
     const personaId = isPersona ? firstText(member.id, member.persona_id, member.personaId) : "";
     state.personaEditId = personaId;
     state.personaEditing = false;
@@ -18133,7 +18506,9 @@
     const agentId = isDeveloper
       ? "developer"
       : isInternalTest
-      ? ""
+      ? firstText(member.id, "development-test-agent")
+      : isOwnerIntent
+      ? firstText(member.id, "owner_intent")
       : firstText(member.id, member.persona_id, member.personaId);
     if (agentId) {
       const statusAction = element("button", "secondary-button persona-status-button", t("profile.view_status"));
@@ -19514,6 +19889,7 @@
     const needs = dom.needsInput.value.trim() || t("create.needs_default");
     dom.intentPreview.textContent = t("create.intent", { audience, appType, needs });
   }
+
 
   async function downloadSourceExport() {
     if (!state.currentId) {
