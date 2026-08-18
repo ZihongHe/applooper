@@ -108,6 +108,18 @@ REMOTE_DISPLAY_MAX_ACTIVE_LAUNCHES = 8
 REMOTE_DISPLAY_INSTALL_VERSION = 1
 REMOTE_DISPLAY_INSTALL_TIMEOUT_SECONDS = 20 * 60
 ISOLATED_WEB_SURFACE_TYPES = {"desktop_web", "mobile_web", "tablet_web", "responsive", "web"}
+EXPERIENCE_VIEW_SURFACE_ALIASES = {
+    "desktop": "desktop_web",
+    "pc": "desktop_web",
+    "computer": "desktop_web",
+    "desktop_web": "desktop_web",
+    "phone": "mobile_web",
+    "mobile": "mobile_web",
+    "h5": "mobile_web",
+    "mobile_web": "mobile_web",
+}
+MOBILE_WEB_VIEWPORT = {"width": 390, "height": 844}
+DESKTOP_WEB_VIEWPORT = {"width": 1280, "height": 800}
 SURFACE_BROWSER_PROFILE_SCHEMA_VERSION = 1
 SURFACE_BROWSER_PROFILE_MAX_COUNT = 64
 SURFACE_BROWSER_PROFILE_POOL_MAX_BYTES = 512 * 1024 * 1024
@@ -3089,6 +3101,8 @@ class WorkflowWebService:
         self._remote_display_install_threads: dict[tuple[str, str], threading.Thread] = {}
         self._remote_display_start_threads: dict[tuple[str, str], threading.Thread] = {}
         self._remote_display_start_states: dict[tuple[str, str], dict[str, Any]] = {}
+        self._remote_display_warm_pending: list[tuple[str, str]] = []
+        self._remote_display_warm_thread: threading.Thread | None = None
         self._surface_preparation_threads: dict[tuple[str, str], threading.Thread] = {}
         self._managed_web_preview_lock = threading.RLock()
         self._managed_web_previews: dict[tuple[str, str], ManagedWebPreview] = {}
@@ -10024,6 +10038,84 @@ class WorkflowWebService:
                 )
         return None
 
+    @staticmethod
+    def _requested_web_surface_kind(requested: str) -> str:
+        wanted = str(requested or "").strip().casefold()
+        mapped = EXPERIENCE_VIEW_SURFACE_ALIASES.get(wanted, "")
+        if mapped:
+            return mapped
+        if any(token in wanted for token in ("mobile", "phone", "h5")):
+            return "mobile_web"
+        if any(token in wanted for token in ("desktop", "pc", "computer")):
+            return "desktop_web"
+        return ""
+
+    @staticmethod
+    def _overlay_shared_web_surface(
+        base: dict[str, Any], kind: str, overlay_id: str
+    ) -> dict[str, Any]:
+        overlay = dict(base)
+        overlay["id"] = overlay_id
+        overlay["surface_id"] = overlay_id
+        overlay["surface"] = kind
+        overlay["surface_type"] = kind
+        if kind == "mobile_web":
+            overlay["viewport"] = dict(MOBILE_WEB_VIEWPORT)
+            overlay["device_name"] = str(overlay.get("device_name") or "Mobile browser")[:80]
+        elif kind == "desktop_web":
+            viewport = overlay.get("viewport") if isinstance(overlay.get("viewport"), dict) else {}
+            width = int(viewport.get("width") or DESKTOP_WEB_VIEWPORT["width"])
+            height = int(viewport.get("height") or DESKTOP_WEB_VIEWPORT["height"])
+            if width < 800:
+                width = DESKTOP_WEB_VIEWPORT["width"]
+                height = DESKTOP_WEB_VIEWPORT["height"]
+            overlay["viewport"] = {"width": width, "height": height}
+            overlay["device_name"] = str(overlay.get("device_name") or "Desktop browser")[:80]
+        return overlay
+
+    def _resolve_requested_experience_surface(
+        self,
+        surfaces: list[dict[str, Any]],
+        requested: Any,
+    ) -> dict[str, Any] | None:
+        rows = [item for item in surfaces if isinstance(item, dict)]
+        if not rows:
+            return None
+        wanted = str(requested or "").strip()
+        if not wanted:
+            return rows[0]
+        wanted_cf = wanted.casefold()
+        kind = self._requested_web_surface_kind(wanted)
+        exact = next(
+            (item for item in rows if str(item.get("id") or "").casefold() == wanted_cf),
+            None,
+        )
+        if exact is not None:
+            exact_kind = str(exact.get("surface") or exact.get("surface_type") or "").casefold()
+            if kind == "mobile_web" and exact_kind != "mobile_web":
+                return self._overlay_shared_web_surface(
+                    exact, "mobile_web", str(exact.get("id") or "mobile")
+                )
+            return exact
+        if kind:
+            for item in rows:
+                item_kind = str(item.get("surface") or item.get("surface_type") or "").casefold()
+                if item_kind == kind:
+                    return item
+            web = next(
+                (
+                    item
+                    for item in rows
+                    if str(item.get("surface") or item.get("surface_type") or "").casefold()
+                    in ISOLATED_WEB_SURFACE_TYPES
+                ),
+                None,
+            )
+            if web is not None:
+                overlay_id = "mobile" if kind == "mobile_web" else "desktop"
+                return self._overlay_shared_web_surface(web, kind, overlay_id)
+        return None
+
     def _remote_display_surface(
         self,
         state: dict[str, Any],
@@ -10032,9 +10124,8 @@ class WorkflowWebService:
         requested = str(surface_id or "").strip()
         if not re.fullmatch(r"[a-z0-9_-]{1,48}", requested):
             raise APIError(HTTPStatus.NOT_FOUND, "surface_not_found", "找不到该应用形态")
-        surface = next(
-            (item for item in self.remote_experience_surfaces(state) if item["id"] == requested),
-            None,
+        surface = self._resolve_requested_experience_surface(
+            self.remote_experience_surfaces(state), requested
         )
         if surface is None:
             raise APIError(HTTPStatus.NOT_FOUND, "surface_not_found", "找不到该应用形态")
@@ -11146,6 +11237,120 @@ class WorkflowWebService:
                 **(dict(record) if isinstance(record, dict) else {}),
             }
 
+    def _isolated_web_ready_target(
+        self,
+        run_id: str,
+        surface_id: str,
+    ) -> RemoteVNCTarget | None:
+        target = self._existing_surface_runtime_target(run_id, surface_id)
+        if target is not None and self._probe_vnc_target(target):
+            return target
+        snapshot = self._remote_display_start_snapshot(run_id, surface_id)
+        if str(snapshot.get("phase") or "") != "ready":
+            return None
+        target = self._remote_target_from_record(snapshot)
+        if target is not None and self._probe_vnc_target(target):
+            return target
+        return None
+
+    def _isolated_web_display_in_flight(self, run_id: str, surface_id: str) -> bool:
+        snapshot = self._remote_display_start_snapshot(run_id, surface_id)
+        return bool(snapshot.get("alive") or str(snapshot.get("phase") or "") == "starting")
+
+    def _isolated_web_display_error(
+        self,
+        run_id: str,
+        surface_id: str,
+    ) -> dict[str, Any] | None:
+        snapshot = self._remote_display_start_snapshot(run_id, surface_id)
+        if snapshot.get("alive") or str(snapshot.get("phase") or "") != "error":
+            return None
+        error = snapshot.get("error")
+        return error if isinstance(error, dict) else None
+
+    def _apply_isolated_web_session_target(
+        self,
+        record: dict[str, Any],
+        target: RemoteVNCTarget | None,
+        target_error: dict[str, Any] | None,
+    ) -> bool:
+        changed = False
+        stored = self._remote_target_from_record(record)
+        if target is not None:
+            if not self._same_remote_target_identity(stored, target):
+                record["target"] = self._remote_target_record(target)
+                changed = True
+            if record.get("target_error") is not None:
+                record["target_error"] = None
+                changed = True
+            if record.get("driver_binding") is not None:
+                record["driver_binding"] = None
+                changed = True
+        else:
+            if record.get("target") is not None:
+                record["target"] = None
+                changed = True
+            if target_error != record.get("target_error"):
+                record["target_error"] = target_error
+                changed = True
+        return changed
+
+    def _reusable_isolated_web_session_locked(
+        self,
+        store: dict[str, Any],
+        surface_id: str,
+    ) -> dict[str, Any] | None:
+        reusable_status = {"preparing", "connecting", "ready", "installing"}
+        best: dict[str, Any] | None = None
+        best_ts = -1.0
+        for record in store.get("sessions", {}).values():
+            if not isinstance(record, dict):
+                continue
+            if record.get("stopped_at") or str(record.get("status") or "") == "stopped":
+                continue
+            if str(record.get("surface_id") or "") != surface_id:
+                continue
+            if str(record.get("status") or "") not in reusable_status:
+                continue
+            timestamp = self._remote_session_timestamp(record)
+            if timestamp >= best_ts:
+                best = record
+                best_ts = timestamp
+        return best
+
+    def _enqueue_warm_remote_displays(self, pending: list[tuple[str, str]]) -> None:
+        with self._remote_display_lock:
+            seen = set(self._remote_display_warm_pending)
+            for item in pending:
+                if item in seen:
+                    continue
+                self._remote_display_warm_pending.append(item)
+                seen.add(item)
+            thread = self._remote_display_warm_thread
+            if thread is None or not thread.is_alive():
+                self._remote_display_warm_thread = threading.Thread(
+                    target=self._warm_remote_display_queue_worker,
+                    daemon=True,
+                    name="warm-remote-display-queue",
+                )
+                self._remote_display_warm_thread.start()
+
+    def _warm_remote_display_queue_worker(self) -> None:
+        while True:
+            with self._remote_display_lock:
+                if not self._remote_display_warm_pending:
+                    self._remote_display_warm_thread = None
+                    return
+                run_id, surface_id = self._remote_display_warm_pending.pop(0)
+            try:
+                self.start_remote_display_service(run_id, surface_id)
+                with self._remote_display_lock:
+                    thread = self._remote_display_start_threads.get((run_id, surface_id))
+                if thread is not None and thread.is_alive():
+                    thread.join(timeout=120)
+            except (APIError, OSError, RuntimeError, ValueError):
+                continue
+
     def _remote_display_starting_public(
         self,
         run_id: str,
@@ -11213,6 +11418,7 @@ class WorkflowWebService:
         if not runs_root.is_dir():
             return 0
         started = 0
+        pending: list[tuple[str, str]] = []
         for path in sorted(runs_root.iterdir()):
             run_id = path.name
             if not path.is_dir() or not RUN_ID_RE.fullmatch(run_id):
@@ -11231,8 +11437,10 @@ class WorkflowWebService:
                 phase = str(status.get("phase") or "")
                 error_code = str((status.get("error") or {}).get("code") or "")
                 if phase == "can_start" or error_code == "preview_runtime_stale":
-                    self.start_remote_display_service(run_id, str(surface["id"]))
+                    pending.append((run_id, str(surface["id"])))
                     started += 1
+        if pending:
+            self._enqueue_warm_remote_displays(pending)
         return started
 
     def start_remote_display_service(
@@ -12072,25 +12280,20 @@ class WorkflowWebService:
                 "这个应用尚未声明可试用的应用形态",
             )
         requested = str(surface_id_value or "").strip()
-        surface = next((item for item in surfaces if item["id"] == requested), None) if requested else surfaces[0]
+        surface = self._resolve_requested_experience_surface(surfaces, requested)
         if surface is None:
             raise APIError(HTTPStatus.NOT_FOUND, "surface_not_found", "找不到该应用形态")
-        if self._is_isolated_web_surface(surface):
-            try:
-                target, state, surface = (
-                    self._ensure_browser_surface_runtime_with_preview_recovery(
-                        state,
-                        surface,
-                        trigger="remote_session",
-                    )
-                )
-                target_error = None
-            except (OSError, SurfaceRuntimeError) as exc:
-                target = None
-                target_error = {
-                    "code": "isolated_surface_start_failed",
-                    "message": str(exc) or "隔离网页窗口启动失败",
-                }
+        isolated_web_surface = self._is_isolated_web_surface(surface)
+        if isolated_web_surface:
+            target = self._isolated_web_ready_target(run_id, str(surface["id"]))
+            if target is None:
+                self.start_remote_display_service(run_id, str(surface["id"]))
+                target = self._isolated_web_ready_target(run_id, str(surface["id"]))
+            target_error = (
+                None
+                if target is not None
+                else self._isolated_web_display_error(run_id, str(surface["id"]))
+            )
         else:
             target, target_error = self.configured_vnc_target(state, surface)
         now = utcnow()
@@ -12117,6 +12320,23 @@ class WorkflowWebService:
         record["updated_at"] = utcnow()
         with self._remote_experience_lock:
             store = self._load_remote_sessions_locked(run_id)
+            if isolated_web_surface and not confirm_install:
+                existing = self._reusable_isolated_web_session_locked(
+                    store, str(surface["id"])
+                )
+                if existing is not None:
+                    if self._apply_isolated_web_session_target(
+                        existing, target, target_error
+                    ):
+                        existing["updated_at"] = utcnow()
+                    public = self._remote_session_public(state, existing)
+                    existing["status"] = public["status"]
+                    existing["updated_at"] = existing.get("updated_at") or utcnow()
+                    self._save_remote_sessions_locked(run_id, store)
+                    public["updated_at"] = existing["updated_at"]
+                    public["install_request_queued"] = False
+                    public["install_request_message_id"] = ""
+                    return public
             self._prune_remote_experience_sessions_locked(
                 run_id,
                 store,
@@ -12191,6 +12411,8 @@ class WorkflowWebService:
             if str(item.get("id") or "")
         }
         binding_invalidated = False
+        need_isolated_start = False
+        isolated_start_surface_id = ""
         with self._remote_experience_lock:
             store = self._load_remote_sessions_locked(run_id)
             record = store.get("sessions", {}).get(session_id)
@@ -12221,34 +12443,23 @@ class WorkflowWebService:
                 if record.get("surface") != surface:
                     record["surface"] = surface
                     target_refreshed = True
-                try:
-                    target = self._ensure_browser_surface_runtime(state, surface)
-                    target_error = None
-                except (OSError, SurfaceRuntimeError) as exc:
-                    target = None
-                    target_error = {
-                        "code": "isolated_surface_start_failed",
-                        "message": str(exc) or "隔离网页窗口启动失败",
-                    }
+                target = self._isolated_web_ready_target(run_id, surface_id)
                 if target is not None:
-                    if not self._same_remote_target_identity(stored_target, target):
-                        record["target"] = self._remote_target_record(target)
-                        target_refreshed = True
-                        binding_invalidated = stored_target is not None
-                    if record.get("target_error") is not None:
-                        record["target_error"] = None
-                        target_refreshed = True
-                    if record.get("driver_binding") is not None:
-                        record["driver_binding"] = None
-                        target_refreshed = True
+                    target_error = None
+                elif self._isolated_web_display_in_flight(run_id, surface_id):
+                    target_error = None
                 else:
-                    if record.get("target") is not None:
-                        record["target"] = None
-                        target_refreshed = True
+                    target_error = self._isolated_web_display_error(run_id, surface_id)
+                    if target_error is None:
+                        need_isolated_start = True
+                        isolated_start_surface_id = surface_id
+                if self._apply_isolated_web_session_target(record, target, target_error):
+                    target_refreshed = True
+                    if stored_target is not None and (
+                        target is None
+                        or not self._same_remote_target_identity(stored_target, target)
+                    ):
                         binding_invalidated = True
-                    if target_error != record.get("target_error"):
-                        record["target_error"] = target_error
-                        target_refreshed = True
             elif not record.get("stopped_at"):
                 surface = dict(current_surface or surface)
                 if record.get("surface") != surface:
@@ -12299,6 +12510,8 @@ class WorkflowWebService:
                 public["updated_at"] = record["updated_at"]
         if binding_invalidated:
             self.close_remote_bridges(run_id, session_id)
+        if need_isolated_start and isolated_start_surface_id:
+            self.start_remote_display_service(run_id, isolated_start_surface_id)
         return public
 
     def stop_remote_experience_session(self, run_id: str, session_id: str) -> dict[str, Any]:
