@@ -35,6 +35,7 @@ import urllib.parse
 import urllib.error
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.header import decode_header
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid, parseaddr
@@ -83,7 +84,9 @@ TASK_VERIFICATION_MODES = {"candidate", "external_non_blocking", "retired"}
 EXPERIENCE_VERIFICATION_STATUSES = {"verified", "failed", "blocked", "unverified"}
 EXPERIENCE_TRIAGE_TYPES = {"product_issue", "verification_gap", "environment_blocker"}
 INTERNAL_TEST_COHORT_SIZE = 2
-TREATMENT_INTERNAL_TEST_COHORT_SIZE = 8
+TREATMENT_INTERNAL_TEST_COHORT_SIZE = 2
+TREATMENT_EXPERIENCE_WAVE_CLOSE_AFTER = 2
+EXPERIENCE_PERSONA_TIMEOUT_SECONDS = 12 * 60
 STUDY_EVALUATION_PROTOCOL_VERSION = "blind-standardized-release-v1"
 STUDY_EVALUATOR_PROMPT_ID = "blind-artifact-regression-cuj-v1"
 STUDY_EVALUATOR_DEFAULT_MODEL = "agnes-2.5-flash"
@@ -1925,6 +1928,43 @@ def prompt_ui_locale(state: dict[str, Any] | None = None, locale: str | None = N
     return "en" if raw.casefold().startswith("en") else "zh-CN"
 
 
+def public_bubble_language_instruction(locale: str) -> str:
+    """Tell the model to write user-visible chat bubbles in the current UI language."""
+
+    if app_i18n.normalize_locale(locale) == app_i18n.EN:
+        return (
+            "[UI language] The current interface is English. Write user-visible chat "
+            "bubbles, trial feedback, task_results.action/evidence, and issue "
+            "title/description/actual/expected in English as much as possible. Do not "
+            "copy a task_script line in another language; paraphrase it in English. "
+            "Proper nouns, button labels, and code identifiers may stay as-is."
+        )
+    return (
+        "【界面语言】当前界面是中文。用户可见的聊天冒泡、体验反馈、task_results.action/"
+        "evidence，以及 issues 的 title/description/actual/expected，请尽量用中文撰写。"
+        "不要照抄另一种语言的 task_script；按同样意思改写成中文。"
+        "专有名词、按钮原文和代码标识可以保留原文。"
+    )
+
+
+def experience_public_report_instruction(locale: str) -> str:
+    """Contract for the public fields that become virtual-user chat bubbles."""
+
+    if app_i18n.normalize_locale(locale) == app_i18n.EN:
+        return (
+            "action must be a concrete user-facing step written in English; if "
+            "task_script is in another language, paraphrase the same action in "
+            "English instead of copying it. evidence only states what you tapped "
+            "and what you saw, for example \"I tapped log water and today's count "
+            "became 3\". "
+        )
+    return (
+        "action 必须用中文写用户能看懂的具体动作；若 task_script 是另一种语言，"
+        "按同样意思改写成中文，不要照抄原文。evidence 只写实际点了什么、看到了什么，"
+        "例如「点了记录喝水，今日杯数变成 3」。"
+    )
+
+
 def coding_role_prompt(
     prompt_role: str,
     *,
@@ -1952,7 +1992,13 @@ def coding_role_prompt(
             "每轮完成一个可验证的小步骤后立即给出结构化结果，避免累积无关工具输出。\n"
         )
     )
-    base = role_prompts[base_role] + budget
+    base = (
+        role_prompts[base_role]
+        + budget
+        + "\n"
+        + public_bubble_language_instruction(ui_locale)
+        + "\n"
+    )
     if os.environ.get("WF_AGNES_COMPAT") == "1":
         base += (
             "\n\n[OpenAI tool-adapter compatibility]\n"
@@ -3187,6 +3233,8 @@ def agent_timeout_seconds_for_role(state: dict[str, Any], role: str) -> int:
     """
 
     timeout = agent_timeout_seconds(state)
+    if is_experience_persona_role(role):
+        return experience_persona_timeout_seconds(state)
     if role == "reviewer":
         # Deep release evaluation is capped separately from the global agent
         # timeout. Default is 20 minutes so a stalled provider cannot hold the
@@ -3213,6 +3261,61 @@ def agent_timeout_seconds_for_role(state: dict[str, Any], role: str) -> int:
         helper_timeout = int(os.environ.get("WF_READONLY_HELPER_TIMEOUT", "180"))
         return max(30, min(timeout, helper_timeout, 15 * 60))
     return min(timeout, 180)
+
+
+def is_experience_persona_role(role: str) -> bool:
+    text = str(role or "")
+    return text == "experience" or text.startswith("experience:")
+
+
+def experience_persona_timeout_seconds(state: dict[str, Any]) -> int:
+    """Bound one virtual-user Computer Use turn to at most 12 minutes."""
+
+    timeout = agent_timeout_seconds(state)
+    with contextlib.suppress(TypeError, ValueError):
+        configured = int(
+            os.environ.get(
+                "WF_EXPERIENCE_PERSONA_TIMEOUT",
+                str(EXPERIENCE_PERSONA_TIMEOUT_SECONDS),
+            )
+        )
+        return max(30, min(timeout, configured, EXPERIENCE_PERSONA_TIMEOUT_SECONDS))
+    return min(timeout, EXPERIENCE_PERSONA_TIMEOUT_SECONDS)
+
+
+def treatment_experience_wave_size(_state: dict[str, Any] | None = None) -> int:
+    with contextlib.suppress(TypeError, ValueError):
+        return max(
+            1,
+            min(
+                int(
+                    os.environ.get(
+                        "WF_TREATMENT_EXPERIENCE_WAVE_SIZE",
+                        str(TREATMENT_INTERNAL_TEST_COHORT_SIZE),
+                    )
+                ),
+                8,
+            ),
+        )
+    return TREATMENT_INTERNAL_TEST_COHORT_SIZE
+
+
+def treatment_experience_wave_close_after(state: dict[str, Any] | None = None) -> int:
+    size = treatment_experience_wave_size(state)
+    with contextlib.suppress(TypeError, ValueError):
+        return max(
+            1,
+            min(
+                int(
+                    os.environ.get(
+                        "WF_TREATMENT_EXPERIENCE_WAVE_CLOSE_AFTER",
+                        str(TREATMENT_EXPERIENCE_WAVE_CLOSE_AFTER),
+                    )
+                ),
+                size,
+            ),
+        )
+    return min(TREATMENT_EXPERIENCE_WAVE_CLOSE_AFTER, size)
 
 
 def reviewer_transport_attempts_per_turn() -> int:
@@ -21271,6 +21374,7 @@ def treatment_experience_tester_slot(
             "candidate_id": candidate,
             "guardrail_set_id": guardrails,
             "tester_attempted": False,
+            "tester_bubble_published": False,
             "tester_result": None,
             "tester_error": "",
         }
@@ -21339,63 +21443,150 @@ def developmental_tester_feedback(result: dict[str, Any]) -> list[dict[str, Any]
     return issues
 
 
+def developmental_tester_outbox_key(candidate: str) -> str:
+    return f"developmental-tester:{str(candidate or '').strip()}"
+
+
+def treatment_tester_bubble_published(
+    state: dict[str, Any],
+    candidate: str,
+    tester_descriptor: dict[str, Any] | None = None,
+) -> bool:
+    """True only after the test-agent result bubble is durable for this candidate."""
+
+    if isinstance(tester_descriptor, dict) and tester_descriptor.get("tester_bubble_published") is True:
+        return True
+    key = developmental_tester_outbox_key(candidate)
+    if key == "developmental-tester:":
+        return False
+    outbox = state.get("web_outbox")
+    if isinstance(outbox, dict):
+        record = outbox.get(key)
+        if isinstance(record, dict) and str(record.get("message_id") or "").strip():
+            return True
+    ledger = state.get("conversation_ledger")
+    if isinstance(ledger, dict):
+        for row in ledger.values():
+            if isinstance(row, dict) and str(row.get("outbox_key") or "") == key:
+                return True
+    return False
+
+
+def mark_tester_bubble_published(
+    state: dict[str, Any],
+    descriptor: dict[str, Any],
+    candidate: str,
+    message_id: str,
+) -> None:
+    descriptor["tester_bubble_published"] = True
+    descriptor["tester_bubble_message_id"] = str(message_id or "").strip()
+    key = developmental_tester_outbox_key(candidate)
+    if key == "developmental-tester:":
+        return
+    outbox = state.setdefault("web_outbox", {})
+    if not isinstance(outbox, dict):
+        return
+    record = outbox.get(key)
+    if not isinstance(record, dict):
+        outbox[key] = {
+            "message_id": str(message_id or key),
+            "channel": "experience:updates",
+            "actor": "experience",
+            "sent_at": utcnow(),
+        }
+
+
 def publish_developmental_tester_update(
     state: dict[str, Any],
     mailer: Mailer | WebChannel,
     descriptor: dict[str, Any],
     result: dict[str, Any] | None,
     error: str = "",
-) -> None:
+) -> str:
     candidate = str(descriptor.get("candidate_id") or "")
+    english = prompt_ui_locale(state) == app_i18n.EN
     if result is None:
         title = app_i18n.resolve(
-            app_i18n.pair("测试智能体稍后会再次检查", "The test agent will check again shortly"),
+            app_i18n.pair("测试智能体本轮检查未完成", "The test agent did not finish this check"),
             prompt_ui_locale(state),
         )
+        detail = public_field(error)[:160]
         body = app_i18n.resolve(
             app_i18n.pair(
-                "我这次还没有完成全部功能检查。当前应用会继续保留，稍后我会重新测试并把结果 @研发智能体。",
-                "I could not finish every feature check this time. The current app remains available; I will test again and @Developer agent with the result.",
+                "我这次还没有完成全部功能检查。"
+                + (f"原因：{detail}。" if detail else "")
+                + "检查结果先记在这里。@研发智能体 请先按当前版本继续，稍后我会重新测试并把完整结果发到研发页。",
+                "I could not finish every feature check this time."
+                + (f" Reason: {detail}." if detail else "")
+                + " @Developer agent, keep this version; I will test again and post the full result on Development.",
             ),
             prompt_ui_locale(state),
         )
     else:
         issues = developmental_tester_feedback(result)
         title = app_i18n.resolve(
-            app_i18n.pair("测试智能体完成了一轮功能检查", "The test agent completed a feature check"),
+            app_i18n.pair("测试智能体完成本轮功能检查", "The test agent finished this feature check"),
             prompt_ui_locale(state),
         )
+        regression = result.get("regression") if isinstance(result.get("regression"), dict) else {}
+        lines: list[str] = []
         if issues:
-            names = "；".join(public_field(item.get("title")) for item in issues[:3])
-            body = app_i18n.resolve(
-                app_i18n.pair(
-                    f"我按主要使用步骤测试了当前应用，发现 {len(issues)} 个问题：{names}。@研发智能体 请先处理这些问题，再交给我复测。",
-                    f"I tested the main usage steps and found {len(issues)} issue(s): "
-                    + "; ".join(public_field(item.get("title")) for item in issues[:3])
-                    + ". @Developer agent please address these before my next check.",
-                ),
-                prompt_ui_locale(state),
+            lines.append(
+                f"I tested the main usage steps and found {len(issues)} issue(s):"
+                if english
+                else f"我按主要使用步骤测试了当前应用，发现 {len(issues)} 个问题："
+            )
+            for item in issues[:5]:
+                issue_title = public_field(item.get("title"))
+                issue_detail = public_field(item.get("description") or item.get("actual"))
+                if issue_title and issue_detail and issue_detail != issue_title:
+                    lines.append(f"- {issue_title}：{issue_detail[:80]}")
+                elif issue_title:
+                    lines.append(f"- {issue_title}")
+            lines.append(
+                "@Developer agent please address these before my next check."
+                if english
+                else "@研发智能体 请先处理这些问题，再交给我复测。"
             )
         else:
-            body = app_i18n.resolve(
-                app_i18n.pair(
-                    "我按主要使用步骤测试了当前应用，没有发现会妨碍继续试用的问题。@研发智能体 当前版本可以交给虚拟用户继续体验。",
-                    "I tested the main usage steps and found no issue that blocks further trials. @Developer agent, this version is ready for the virtual users to continue.",
-                ),
-                prompt_ui_locale(state),
+            lines.append(
+                "I tested the main usage steps and found no issue that blocks further trials."
+                if english
+                else "我按主要使用步骤测试了当前应用，没有发现会妨碍继续试用的问题。"
             )
-    mailer.send(
-        state,
-        title,
-        body,
-        key=f"developmental-tester:{candidate}",
-        channel="experience:updates",
-        actor="experience",
-        persona_name=app_i18n.resolve(
-            app_i18n.pair("测试智能体", "Test agent"), prompt_ui_locale(state)
-        ),
-        meta={"pm_mentions": ["developer"], "pm_bubble": body},
+            if regression.get("ran") is True:
+                lines.append(
+                    "Existing regression checks also passed."
+                    if english and regression.get("passed") is True
+                    else "现有回归检查也已通过。"
+                    if regression.get("passed") is True
+                    else "Existing regression checks reported a failure."
+                    if english
+                    else "现有回归检查未通过。"
+                )
+            lines.append(
+                "@Developer agent, this version can continue to the next check."
+                if english
+                else "@研发智能体 当前版本可以继续进入下一项检查。"
+            )
+        body = "\n".join(lines)
+    message_id = str(
+        mailer.send(
+            state,
+            title,
+            body,
+            key=developmental_tester_outbox_key(candidate),
+            channel="experience:updates",
+            actor="experience",
+            persona_name=app_i18n.resolve(
+                app_i18n.pair("测试智能体", "Test agent"), prompt_ui_locale(state)
+            ),
+            meta={"pm_mentions": ["developer"], "pm_bubble": body},
+        )
+        or ""
     )
+    mark_tester_bubble_published(state, descriptor, candidate, message_id)
+    return message_id
 
 
 def phase_review(state: dict[str, Any], mailer: Mailer | WebChannel) -> None:
@@ -22695,18 +22886,14 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         assert developmental_descriptor is not None
         validated = str(developmental_descriptor.get("candidate_id") or "")
         validated_guardrails = str(developmental_descriptor.get("guardrail_set_id") or "")
-        if (
-            not validated
-            or candidate_fingerprint(state) != validated
-            or guardrail_fingerprint(state) != validated_guardrails
-        ):
+        if not validated:
             state.pop("developmental_experience", None)
             state.pop("experience_mode", None)
             state["phase"] = "DEVELOP"
             set_public_phase_summary(
                 state,
-                current="研发版本已变化，本轮内测已作废",
-                next_step="继续研发，并在下一个可运行版本重新试用",
+                current="本轮内测缺少已交付版本，已返回研发",
+                next_step="交付可运行版本后再启动测试智能体和虚拟用户",
             )
             return
     else:
@@ -22789,42 +22976,6 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         guardrails=str(validated_guardrails or ""),
         developmental_descriptor=developmental_descriptor,
     )
-    if tester_descriptor is not None and not tester_descriptor.get("tester_attempted"):
-        tester_descriptor["tester_attempted"] = True
-        tester_descriptor["tester_started_at"] = utcnow()
-        save_state(state)
-        try:
-            tester_result = run_developmental_test_agent(state, tester_descriptor)
-        except (WorkflowStopRequested, FatalWorkflowError):
-            raise
-        except Exception as exc:
-            tester_error = f"{type(exc).__name__}: {exc}"[:1_000]
-            tester_descriptor["tester_error"] = tester_error
-            tester_descriptor["tester_completed_at"] = utcnow()
-            event(
-                state,
-                "developmental_test_agent_failed",
-                candidate_id=validated,
-                error=tester_error,
-            )
-            with contextlib.suppress(Exception):
-                publish_developmental_tester_update(
-                    state, mailer, tester_descriptor, None, tester_error
-                )
-        else:
-            tester_descriptor["tester_result"] = tester_result
-            tester_descriptor["tester_completed_at"] = utcnow()
-            with contextlib.suppress(Exception):
-                publish_developmental_tester_update(
-                    state, mailer, tester_descriptor, tester_result
-                )
-            event(
-                state,
-                "developmental_test_agent_completed",
-                candidate_id=validated,
-                issues=len(developmental_tester_feedback(tester_result)),
-            )
-        save_state(state)
     persona_ids = {str(persona.get("id") or "") for persona in state.get("personas") or []}
     previous_ids = {str(result.get("persona_id") or "") for result in previous if isinstance(result, dict)}
     previous_environment_only = bool(
@@ -22979,6 +23130,183 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
     state["internal_test_queue"] = test_queue
     save_state(state)
     personas = cohort
+
+    def blocked_persona_result(
+        persona_row: dict[str, Any],
+        script: list[Any],
+        *,
+        reason: str = "interrupted",
+    ) -> dict[str, Any]:
+        timed_out = reason == "timeout"
+        limit_minutes = max(1, experience_persona_timeout_seconds(state) // 60)
+        return {
+            "persona_id": str(persona_row.get("id") or ""),
+            "platform": str(persona_row.get("device") or "Web"),
+            "computer_use_attempted": True,
+            "computer_use_succeeded": False,
+            "computer_use_incomplete": timed_out,
+            "computer_use_tools": ["Chrome Computer Use"],
+            "task_results": [
+                {
+                    "step_id": str(step.get("id") or ""),
+                    "status": "BLOCKED",
+                    "evidence": (
+                        f"自动浏览器试用已到 {limit_minutes} 分钟上限"
+                        if timed_out
+                        else "自动浏览器试用在完成前中断"
+                    ),
+                }
+                for step in script
+                if isinstance(step, dict) and str(step.get("id") or "")
+            ],
+            "satisfied": False,
+            "issues": [
+                {
+                    "title": "虚拟用户浏览器试用超时" if timed_out else "虚拟用户浏览器试用未完成",
+                    "severity": "high",
+                    "description": (
+                        f"自动浏览器试用已到 {limit_minutes} 分钟上限，本轮提交不完整结果；测试智能体与其他虚拟用户的证据仍会返回研发智能体。"
+                        if timed_out
+                        else "自动浏览器试用在完成前中断；测试智能体与其他虚拟用户的证据仍会返回研发智能体。"
+                    ),
+                    "steps": ["打开当前可运行页面并执行画像任务"],
+                    "expected": "完成真实页面操作并保存体验证据",
+                    "actual": (
+                        "浏览器试用在时限内未返回完整结构化结果"
+                        if timed_out
+                        else "浏览器试用进程在返回结构化结果前中断"
+                    ),
+                    "screenshot": "",
+                    "affected_guardrails": [],
+                    "change_scope": "bug",
+                    "confidence": 1.0,
+                }
+            ],
+            "screenshots": [],
+            "blocker": "自动浏览器试用超时" if timed_out else "自动浏览器试用执行中断",
+        }
+
+    def invoke_persona_experience(
+        persona_row: dict[str, Any],
+        script: list[Any],
+        artifact_dir: Path,
+    ) -> dict[str, Any]:
+        ui_locale = prompt_ui_locale(state)
+        payload = {
+            "task": public_bubble_language_instruction(ui_locale)
+            + "严格按画像通过 UI 完成 task_script。"
+            + (
+                "本轮只复测上轮你本人提到的问题，不要再做完整巡检。"
+                if any(
+                    isinstance(row, dict) and row.get("issues")
+                    for row in previous
+                    if isinstance(row, dict) and row.get("persona_id") == persona_row["id"]
+                )
+                else "按平时使用习惯试用核心功能。"
+            )
+            + "你是真实用户，只谈自己能不能完成这件事、哪里不顺手；禁止写 localStorage、认证体系、账号系统、产品成熟度、架构或同步方案。"
+            + "issues 的 title/description/actual/expected 各不超过 40 字，用生活化短句。"
+            + experience_auth_cuj_prompt(state)
+            + "有 experience_twin 时必须只用 Chrome Computer Use（不可用时可用 Playwright 等真实浏览器自动化）打开这个统一 Web Preview，按 persona.trial_surface 选择对应 view：desktop_web 用电脑网页端（宽屏），mobile_web 用手机网页端（竖屏），并严格使用该 view.route 和 viewport.width/height；跨端任务在同一 shared_session 中切换多个 view。不得为 Android、iOS、鸿蒙或 Windows 编写专用体验分支。"
+            + "必须留意当前设备上的呈现样式：若电脑端却是窄竖屏手机排版，或手机端却是宽屏电脑排版、按钮过小点不到，这就是问题，要写进 issues 交给研发改进，change_scope=usability_within_guardrail。"
+            + "没有 experience_twin 时，如实报告需要回到 Claude Code/Codex 原生环境体验，不得读取源码或调用 API 冒充体验。必须把至少一张本轮真实 UI 截图保存到这个全新 artifact_dir，并在 screenshots 返回绝对路径；computer_use_tools 列出实际工具，否则不能 satisfied。公开截图只保留能解释结论的最多 4 张：每个问题最多 1 张，正常流程最终态最多 1 张；等待、轮询、加载中不得反复截图，也不要提交重复画面。截图必须 fullPage=false，关键信息很小时优先截取可见元素并保留必要上下文。不要把体验产物写入源码目录。task_results 必须与 task_script 一一对应且每项含 step_id,status,action,evidence；"
+            + experience_public_report_instruction(ui_locale)
+            + "禁止写「第 N 个预定体验步骤」、内部编号、工具名或推理过程。issues 每项含 title,severity,description,steps,expected,actual,screenshot,affected_guardrails,change_scope,confidence；change_scope 只能是 bug/usability_within_guardrail/new_major_capability/changes_existing_capability。已被用户明确拒绝且列入 ignored_feedback 的大能力不得再次作为阻断问题。你的真实观察会以第一人称体验副本同步给用户，因此 evidence/description/expected/actual 只写实际操作和感受，不写分析过程、置信度、内部编号或工具推理。",
+            "ui_locale": ui_locale,
+            "candidate_id": validated,
+            "guardrail_set_id": validated_guardrails,
+            "batch_id": batch_id,
+            "artifact_dir": str(artifact_dir),
+            "persona": {**persona_row, "task_script": script},
+            "persona_initial_state": persona_initial_state_for_experience(persona_row),
+            "active_guardrails": active_guardrails(state),
+            "experience_entry": (state.get("last_developer") or {}).get("experience_entry"),
+            "launch_instructions": (state.get("last_developer") or {}).get("launch_instructions"),
+            "experience_twin": experience_twin_from_state(state),
+            "previous_results": [
+                experience_result_for_prompt(x)
+                for x in previous
+                if isinstance(x, dict) and x.get("persona_id") == persona_row["id"]
+            ],
+            "ignored_feedback": sorted(nonblocking_experience_feedback_keys(state)),
+        }
+        if is_agnes_qualification_state(state):
+            payload["task"] += (
+                " Agnes 隔离 trial 禁止通过 npm、pip、apt 或网络下载浏览器库。"
+                "优先使用本轮实际提供的 Chrome Computer Use 工具；若该工具不可调用，"
+                "立即返回 computer_use_attempted=false、computer_use_succeeded=false，"
+                "并把 blocker 明确写为浏览器执行环境不可用，不得反复安装依赖或读取源码冒充体验。"
+            )
+        role = str(persona_row.get("_session_key") or f"experience:{persona_row['id']}")
+        local_state = dict(state)
+        local_state["_namespace_state_writer"] = {"session_roles": [role]}
+        sessions = state.get("sessions")
+        local_state["sessions"] = dict(sessions) if isinstance(sessions, dict) else {}
+        result = call_claude(
+            local_state,
+            role,
+            prompt_json("进行真实产品体验", payload),
+            EXPERIENCE_SCHEMA,
+            chrome=True,
+            artifact_dir=artifact_dir,
+        )
+        result["_artifact_dir"] = str(artifact_dir)
+        if result.get("persona_id") != persona_row["id"]:
+            result["issues"] = list(result.get("issues") or []) + [
+                {"title": "画像身份不匹配", "severity": "blocker", "change_scope": "bug"}
+            ]
+            result["satisfied"] = False
+        return result
+
+    def publish_persona_result(
+        persona_row: dict[str, Any],
+        script: list[Any],
+        raw_result: dict[str, Any],
+        *,
+        tested_at: str,
+    ) -> dict[str, Any]:
+        result = normalize_experience_result(
+            state,
+            raw_result,
+            expected_script=script,
+            candidate_id=validated,
+            guardrail_set_id=validated_guardrails,
+            batch_id=batch_id,
+            tested_at=tested_at,
+            coverage_scope={
+                "kind": "internal_test",
+                "persona_id": str(persona_row.get("id") or ""),
+                "platform": str(raw_result.get("platform") or ""),
+                "expected_step_ids": [
+                    str(step.get("id") or "")
+                    for step in script
+                    if isinstance(step, dict) and str(step.get("id") or "")
+                ],
+            },
+        )
+        cached_results[persona_row["id"]] = result
+        queue_item = queue_by_persona[str(persona_row.get("id") or "")]
+        queue_item["status"] = "completed"
+        queue_item["completed_at"] = str(queue_item.get("completed_at") or utcnow())
+        state["internal_test_queue"] = test_queue
+        save_state(state)
+        results.append(result)
+        send_experience_copy(
+            state,
+            mailer,
+            persona_row,
+            result,
+            candidate=validated,
+            attempt=f"r{state.get('round', 0)}",
+        )
+        service_priority_web_messages(
+            state,
+            mailer,
+            boundary=f"persona_experience_complete:{persona_row['id']}",
+        )
+        return result
+
+    pending_runs: list[tuple[int, dict[str, Any], list[Any]]] = []
     for persona_index, persona in enumerate(personas, 1):
         result = cached_results.get(persona["id"])
         persona_script = experience_persona_script(state, persona, personas)
@@ -22991,181 +23319,209 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         )
         if follow_script:
             persona_script = follow_script
-        if not isinstance(result, dict):
-            persona_name = public_field(persona.get("name")) or f"体验者 {persona_index}"
-            persona_name_i18n = (
-                persona.get("name_i18n")
-                if app_i18n.is_pair(persona.get("name_i18n"))
-                else app_i18n.pair(persona_name, persona_name)
+        if isinstance(result, dict):
+            publish_persona_result(
+                persona,
+                persona_script,
+                result,
+                tested_at=str(result.get("tested_at") or batch.get("created_at") or utcnow()),
             )
-            persona_name_zh = app_i18n.resolve(persona_name_i18n, app_i18n.ZH, persona_name)
-            persona_name_en = app_i18n.resolve(persona_name_i18n, app_i18n.EN, persona_name)
-            queue_item = queue_by_persona[str(persona.get("id") or "")]
-            queue_item["status"] = "running"
-            queue_item["started_at"] = str(queue_item.get("started_at") or utcnow())
-            state["internal_test_queue"] = test_queue
-            set_public_work_summary(
-                state,
-                kind="experiencing",
-                current=app_i18n.pair(
-                    f"正在由「{persona_name_zh}」实际体验应用（{persona_index}/{len(personas)}）",
-                    f"{persona_name_en} is trying the app ({persona_index}/{len(personas)})",
-                ),
-                next_step=app_i18n.pair(
-                    "本次体验完成后优先读取你的新消息，再继续下一位体验者",
-                    "After this trial, check your newest message before continuing to the next participant",
-                ),
+            continue
+        queue_item = queue_by_persona[str(persona.get("id") or "")]
+        queue_item["status"] = "running"
+        queue_item["started_at"] = str(queue_item.get("started_at") or utcnow())
+        pending_runs.append((persona_index, persona, persona_script))
+    need_tester = tester_descriptor is not None and not treatment_tester_bubble_published(
+        state, str(validated or ""), tester_descriptor
+    )
+    if pending_runs or need_tester:
+        if pending_runs:
+            first_name = public_field(pending_runs[0][1].get("name")) or "体验者"
+            first_name_i18n = (
+                pending_runs[0][1].get("name_i18n")
+                if app_i18n.is_pair(pending_runs[0][1].get("name_i18n"))
+                else app_i18n.pair(first_name, first_name)
             )
-            artifact_dir = run_dir(state["run_id"]) / "artifacts" / persona["id"] / f"{validated}-r{state['round']}-{uuid.uuid4().hex[:6]}"
+        else:
+            first_name = "体验者"
+            first_name_i18n = app_i18n.pair(first_name, first_name)
+        if need_tester and pending_runs:
+            current_summary = app_i18n.pair(
+                f"测试智能体与 {len(pending_runs)} 位虚拟用户正在同时体验应用",
+                f"The test agent and {len(pending_runs)} virtual users are trying the app at the same time",
+            )
+        elif need_tester:
+            current_summary = app_i18n.pair(
+                "测试智能体正在检查当前版本",
+                "The test agent is checking the current version",
+            )
+        elif len(pending_runs) == 1:
+            current_summary = app_i18n.pair(
+                f"正在由「{app_i18n.resolve(first_name_i18n, app_i18n.ZH, first_name)}」实际体验应用",
+                f"{app_i18n.resolve(first_name_i18n, app_i18n.EN, first_name)} is trying the app",
+            )
+        else:
+            current_summary = app_i18n.pair(
+                f"{len(pending_runs)} 位虚拟用户正在同时体验应用",
+                f"{len(pending_runs)} virtual users are trying the app at the same time",
+            )
+        set_public_work_summary(
+            state,
+            kind="experiencing",
+            current=current_summary,
+            next_step=app_i18n.pair(
+                "体验副本和测试智能体检查结果会以冒泡出现在研发页；测试智能体和两名虚拟用户都完成后再交回研发智能体",
+                "Trial notes and the test-agent check appear as bubbles on Development. This round returns after the test agent and two virtual users finish",
+            ),
+        )
+        state["internal_test_queue"] = test_queue
+        save_state(state)
+
+        def run_one(
+            item: tuple[int, dict[str, Any], list[Any]],
+        ) -> tuple[dict[str, Any], list[Any], dict[str, Any], Exception | None]:
+            _index, persona_row, script = item
+            artifact_dir = (
+                run_dir(state["run_id"])
+                / "artifacts"
+                / persona_row["id"]
+                / f"{validated}-r{state['round']}-{uuid.uuid4().hex[:6]}"
+            )
             artifact_dir.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "task": "严格按画像通过 UI 完成 task_script。"
-                + (
-                    "本轮只复测上轮你本人提到的问题，不要再做完整巡检。"
-                    if any(
-                        isinstance(row, dict) and row.get("issues")
-                        for row in previous
-                        if isinstance(row, dict) and row.get("persona_id") == persona["id"]
-                    )
-                    else "按平时使用习惯试用核心功能。"
-                )
-                + "你是真实用户，只谈自己能不能完成这件事、哪里不顺手；禁止写 localStorage、认证体系、账号系统、产品成熟度、架构或同步方案。"
-                + "issues 的 title/description/actual/expected 各不超过 40 字，用生活化短句。"
-                + experience_auth_cuj_prompt(state)
-                + "有 experience_twin 时必须只用 Chrome Computer Use（不可用时可用 Playwright 等真实浏览器自动化）打开这个统一 Web Preview，按 persona.device 选择最匹配的 view，并严格使用该 view.route 和 viewport.width/height；跨端任务在同一 shared_session 中切换多个 view。不得为 Android、iOS、鸿蒙或 Windows 编写专用体验分支。没有 experience_twin 时，如实报告需要回到 Claude Code/Codex 原生环境体验，不得读取源码或调用 API 冒充体验。必须把至少一张本轮真实 UI 截图保存到这个全新 artifact_dir，并在 screenshots 返回绝对路径；computer_use_tools 列出实际工具，否则不能 satisfied。公开截图只保留能解释结论的最多 4 张：每个问题最多 1 张，正常流程最终态最多 1 张；等待、轮询、加载中不得反复截图，也不要提交重复画面。截图必须 fullPage=false，关键信息很小时优先截取可见元素并保留必要上下文。不要把体验产物写入源码目录。task_results 必须与 task_script 一一对应且每项含 step_id,status,action,evidence；action 必须抄写 task_script 里用户能看懂的具体动作，evidence 只写实际点了什么、看到了什么，例如「点了记录喝水，今日杯数变成 3」。禁止写「第 N 个预定体验步骤」、内部编号、工具名或推理过程。issues 每项含 title,severity,description,steps,expected,actual,screenshot,affected_guardrails,change_scope,confidence；change_scope 只能是 bug/usability_within_guardrail/new_major_capability/changes_existing_capability。已被用户明确拒绝且列入 ignored_feedback 的大能力不得再次作为阻断问题。你的真实观察会以第一人称体验副本同步给用户，因此 evidence/description/expected/actual 只写实际操作和感受，不写分析过程、置信度、内部编号或工具推理。",
-                "candidate_id": validated,
-                "guardrail_set_id": validated_guardrails,
-                "batch_id": batch_id,
-                "artifact_dir": str(artifact_dir),
-                "persona": {**persona, "task_script": persona_script},
-                "persona_initial_state": persona_initial_state_for_experience(persona),
-                "active_guardrails": active_guardrails(state),
-                "experience_entry": (state.get("last_developer") or {}).get("experience_entry"),
-                "launch_instructions": (state.get("last_developer") or {}).get("launch_instructions"),
-                "experience_twin": experience_twin_from_state(state),
-                "previous_results": [
-                    experience_result_for_prompt(x)
-                    for x in previous
-                    if isinstance(x, dict) and x.get("persona_id") == persona["id"]
-                ],
-                "ignored_feedback": sorted(nonblocking_experience_feedback_keys(state)),
-            }
-            if is_agnes_qualification_state(state):
-                payload["task"] += (
-                    " Agnes 隔离 trial 禁止通过 npm、pip、apt 或网络下载浏览器库。"
-                    "优先使用本轮实际提供的 Chrome Computer Use 工具；若该工具不可调用，"
-                    "立即返回 computer_use_attempted=false、computer_use_succeeded=false，"
-                    "并把 blocker 明确写为浏览器执行环境不可用，不得反复安装依赖或读取源码冒充体验。"
-                )
             try:
-                result = call_claude(
-                    state,
-                    persona.get("_session_key") or f"experience:{persona['id']}",
-                    prompt_json("进行真实产品体验", payload),
-                    EXPERIENCE_SCHEMA,
-                    chrome=True,
-                    artifact_dir=artifact_dir,
-                )
+                return persona_row, script, invoke_persona_experience(persona_row, script, artifact_dir), None
             except WorkflowStopRequested:
                 raise
             except WorkflowError as exc:
-                if not developmental:
+                timed_out = "超时" in str(exc)
+                if not developmental and not timed_out:
                     raise
-                # One unavailable browser persona must not discard the test
-                # agent's diagnosis or strand the whole AppLooper loop.  Keep
-                # a bounded failed observation, continue the remaining
-                # personas, and send the combined evidence back to DEVELOP.
-                result = {
-                    "persona_id": str(persona.get("id") or ""),
-                    "platform": str(persona.get("device") or "Web"),
-                    "computer_use_attempted": True,
-                    "computer_use_succeeded": False,
-                    "computer_use_tools": ["Chrome Computer Use"],
-                    "task_results": [
-                        {
-                            "step_id": str(step.get("id") or ""),
-                            "status": "BLOCKED",
-                            "evidence": "自动浏览器试用在完成前中断",
-                        }
-                        for step in persona_script
-                        if isinstance(step, dict) and str(step.get("id") or "")
-                    ],
-                    "satisfied": False,
-                    "issues": [
-                        {
-                            "title": "虚拟用户浏览器试用未完成",
-                            "severity": "high",
-                            "description": "自动浏览器试用在完成前中断；测试智能体与其他虚拟用户的证据仍会返回研发智能体。",
-                            "steps": ["打开当前可运行页面并执行画像任务"],
-                            "expected": "完成真实页面操作并保存体验证据",
-                            "actual": "浏览器试用进程在返回结构化结果前中断",
-                            "screenshot": "",
-                            "affected_guardrails": [],
-                            "change_scope": "bug",
-                            "confidence": 1.0,
-                        }
-                    ],
-                    "screenshots": [],
-                    "blocker": "自动浏览器试用执行中断",
-                }
+                return (
+                    persona_row,
+                    script,
+                    blocked_persona_result(
+                        persona_row,
+                        script,
+                        reason="timeout" if timed_out else "interrupted",
+                    ),
+                    exc,
+                )
+
+        def run_tester_job() -> tuple[dict[str, Any] | None, str]:
+            try:
+                return run_developmental_test_agent(state, tester_descriptor or {}), ""
+            except WorkflowStopRequested:
+                raise
+            except Exception as exc:
+                return None, f"{type(exc).__name__}: {exc}"[:1_000]
+
+        def publish_tester_outcome(tester_result: dict[str, Any] | None, tester_error: str) -> None:
+            if not isinstance(tester_descriptor, dict):
+                return
+            tester_descriptor["tester_completed_at"] = utcnow()
+            if tester_error:
+                tester_descriptor["tester_error"] = tester_error
                 event(
                     state,
-                    "developmental_persona_failed_continuing",
-                    persona_id=str(persona.get("id") or ""),
-                    error_type=type(exc).__name__,
-                    error=str(exc)[-500:],
+                    "developmental_test_agent_failed",
+                    candidate_id=validated,
+                    error=tester_error,
                 )
-            result["_artifact_dir"] = str(artifact_dir)
-            if result.get("persona_id") != persona["id"]:
-                result["issues"] = list(result.get("issues") or []) + [{"title": "画像身份不匹配", "severity": "blocker", "change_scope": "bug"}]
-                result["satisfied"] = False
-            result = normalize_experience_result(
-                state,
-                result,
-                expected_script=persona_script,
-                candidate_id=validated,
-                guardrail_set_id=validated_guardrails,
-                batch_id=batch_id,
-                tested_at=utcnow(),
-                coverage_scope={
-                    "kind": "internal_test",
-                    "persona_id": str(persona.get("id") or ""),
-                    "platform": str(result.get("platform") or ""),
-                    "expected_step_ids": [
-                        str(step.get("id") or "")
-                        for step in persona_script
-                        if isinstance(step, dict) and str(step.get("id") or "")
-                    ],
-                },
+                publish_developmental_tester_update(
+                    state, mailer, tester_descriptor, None, tester_error
+                )
+            else:
+                tester_descriptor["tester_result"] = tester_result
+                publish_developmental_tester_update(
+                    state, mailer, tester_descriptor, tester_result
+                )
+                event(
+                    state,
+                    "developmental_test_agent_completed",
+                    candidate_id=validated,
+                    issues=len(developmental_tester_feedback(tester_result or {})),
+                )
+            save_state(state)
+
+        worker_count = max(1, len(pending_runs) + (1 if need_tester else 0))
+        with ThreadPoolExecutor(max_workers=worker_count) as pool:
+            tester_future = None
+            if need_tester:
+                tester_descriptor["tester_attempted"] = True
+                tester_descriptor["tester_started_at"] = utcnow()
+                save_state(state)
+                tester_future = pool.submit(run_tester_job)
+            future_map = {pool.submit(run_one, item): item for item in pending_runs}
+            close_after = (
+                min(treatment_experience_wave_close_after(state), len(pending_runs))
+                if study_multi_agent_treatment_enabled(state) and pending_runs
+                else len(pending_runs)
             )
-            cached_results[persona["id"]] = result
-            queue_item["status"] = "completed"
-            queue_item["completed_at"] = utcnow()
+            finished_vu = 0
+            deferred_runs: list[tuple[int, dict[str, Any], list[Any]]] = []
+            tracked = list(future_map)
+            if tester_future is not None:
+                tracked.append(tester_future)
+            try:
+                for fut in as_completed(tracked):
+                    if fut is tester_future:
+                        tester_result, tester_error = fut.result()
+                        publish_tester_outcome(tester_result, tester_error)
+                        continue
+                    persona_row, script, raw_result, fail = fut.result()
+                    if fail is not None:
+                        event(
+                            state,
+                            "developmental_persona_failed_continuing",
+                            persona_id=str(persona_row.get("id") or ""),
+                            error_type=type(fail).__name__,
+                            error=str(fail)[-500:],
+                            timed_out="超时" in str(fail),
+                        )
+                    publish_persona_result(persona_row, script, raw_result, tested_at=utcnow())
+                    finished_vu += 1
+                    if finished_vu >= close_after:
+                        for other, item in future_map.items():
+                            if other is not fut and not other.done():
+                                other.cancel()
+                                deferred_runs.append(item)
+                        break
+                if tester_future is not None and not tester_future.done():
+                    tester_result, tester_error = tester_future.result()
+                    publish_tester_outcome(tester_result, tester_error)
+            except WorkflowStopRequested:
+                for fut in future_map:
+                    fut.cancel()
+                if tester_future is not None:
+                    tester_future.cancel()
+                raise
+        if deferred_runs:
+            deferred_ids = [
+                str(item[1].get("id") or "")
+                for item in deferred_runs
+                if str(item[1].get("id") or "")
+            ]
+            priority = [
+                str(item)
+                for item in (state.get("next_internal_test_priority_personas") or [])
+                if str(item)
+            ]
+            state["next_internal_test_priority_personas"] = list(dict.fromkeys(priority + deferred_ids))
+            for item in deferred_runs:
+                queue_item = queue_by_persona.get(str(item[1].get("id") or ""))
+                if queue_item:
+                    queue_item["status"] = "deferred"
+                    queue_item["completed_at"] = ""
+            event(
+                state,
+                "experience_wave_closed",
+                candidate_id=validated,
+                finished=finished_vu,
+                deferred=deferred_ids,
+            )
             state["internal_test_queue"] = test_queue
             save_state(state)
-        else:
-            result = normalize_experience_result(
-                state,
-                result,
-                expected_script=persona_script,
-                candidate_id=validated,
-                guardrail_set_id=validated_guardrails,
-                batch_id=batch_id,
-                tested_at=str(result.get("tested_at") or batch.get("created_at") or utcnow()),
-            )
-            cached_results[persona["id"]] = result
-            queue_item = queue_by_persona[str(persona.get("id") or "")]
-            queue_item["status"] = "completed"
-            queue_item["completed_at"] = str(queue_item.get("completed_at") or utcnow())
-            state["internal_test_queue"] = test_queue
-        results.append(result)
-        send_experience_copy(state, mailer, persona, result, candidate=validated, attempt=f"r{state.get('round', 0)}")
-        service_priority_web_messages(
-            state,
-            mailer,
-            boundary=f"persona_experience_complete:{persona['id']}",
-        )
-    latest_by_persona = {
+        latest_by_persona = {
         str(row.get("persona_id") or ""): row
         for row in previous
         if isinstance(row, dict) and str(row.get("persona_id") or "")
@@ -23228,6 +23584,36 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
     adjusted = maybe_adjust_persona_initial_states_from_experience(state, results)
     if adjusted:
         event(state, "persona_initial_state_adjusted", persona_ids=adjusted)
+    if (
+        tester_descriptor is not None
+        and study_multi_agent_treatment_enabled(state)
+        and not treatment_tester_bubble_published(state, str(validated or ""), tester_descriptor)
+    ):
+        state["phase"] = "EXPERIENCE"
+        if developmental:
+            state["experience_mode"] = "developmental"
+        set_public_work_summary(
+            state,
+            kind="experiencing",
+            current=app_i18n.pair(
+                "测试智能体仍在检查当前版本，检查结果会以冒泡出现在研发页",
+                "The test agent is still checking this version; its result will appear as a bubble on Development",
+            ),
+            next_step=app_i18n.pair(
+                "测试智能体的检查冒泡出现后再把本轮反馈交回研发智能体",
+                "Return this round to the developer agent after the test-agent bubble appears",
+            ),
+        )
+        save_state(state)
+        event(
+            state,
+            "developmental_tester_bubble_pending",
+            candidate_id=validated,
+            tester_attempted=bool(
+                isinstance(tester_descriptor, dict) and tester_descriptor.get("tester_attempted")
+            ),
+        )
+        return
     if developmental:
         ignored = nonblocking_experience_feedback_keys(state)
         developmental_feedback = [

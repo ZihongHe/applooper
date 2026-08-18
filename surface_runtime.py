@@ -35,6 +35,58 @@ class SurfaceRuntimeError(RuntimeError):
     """Raised when an isolated surface cannot be started or controlled."""
 
 
+def trial_seed_apply_expression(seed: dict[str, Any] | None) -> str:
+    """Build a page-scoped script that writes temporary trial data."""
+
+    payload = seed if isinstance(seed, dict) else {}
+    return (
+        "(() => { const seed = "
+        + json.dumps(payload, ensure_ascii=True)
+        + "; try {"
+        " const keys = [];"
+        " try { for (let i = 0; i < localStorage.length; i += 1) keys.push(localStorage.key(i) || ''); } catch (_e) {}"
+        " const preferred = String(seed.storage_key || '');"
+        " const chosen = preferred || keys[0] || '';"
+        " const listKey = String(seed.list_key || '');"
+        " const records = Array.isArray(seed.records) ? seed.records : [];"
+        " const need = Math.max(0, Math.min(8, Number(seed.ensure_count || seed.ensure_logs || 0)));"
+        " if (chosen && (records.length || need > 0)) {"
+        "   let raw = {}; try { raw = JSON.parse(localStorage.getItem(chosen) || '{}') || {}; } catch (_e2) { raw = {}; }"
+        "   if (records.length && listKey) {"
+        "     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) raw = {};"
+        "     if (!Array.isArray(raw[listKey])) raw[listKey] = [];"
+        "     records.forEach((rec) => {"
+        "       if (!rec || typeof rec !== 'object') return;"
+        "       const id = String(rec.id || '');"
+        "       if (id && raw[listKey].some((row) => row && String(row.id || '') === id)) return;"
+        "       raw[listKey].push(rec);"
+        "     });"
+        "     if (listKey === 'pets' && !raw.selectedPetId && raw.pets && raw.pets[0]) raw.selectedPetId = raw.pets[0].id;"
+        "   } else {"
+        "     const today = new Date().toISOString().slice(0, 10);"
+        "     if (raw.days && typeof raw.days === 'object') {"
+        "       let day = raw.days[today]; if (!day || typeof day !== 'object') day = {count:0,logs:[],goal:8};"
+        "       if (!Array.isArray(day.logs)) day.logs = [];"
+        "       while (day.logs.length < need) day.logs.push({time:'12:00',ts:Date.now()-day.logs.length*60000});"
+        "       day.count = Math.max(Number(day.count||0), day.logs.length); raw.days[today] = day;"
+        "     } else {"
+        "       const found = listKey || ['pets','items','todos','tasks','records','list'].find((name) => Array.isArray(raw[name]));"
+        "       if (found) {"
+        "         if (!Array.isArray(raw[found])) raw[found] = [];"
+        "         while (raw[found].length < need) raw[found].push({id:'trial-'+Date.now(), title:'Trial item', name:'Trial item'});"
+        "       } else if (Array.isArray(raw)) {"
+        "         while (raw.length < need) raw.push({id:'trial-'+Date.now(), title:'Trial item'});"
+        "       }"
+        "     }"
+        "   }"
+        "   localStorage.setItem(chosen, JSON.stringify(raw));"
+        " }"
+        " const id = String(seed.focus_id || '');"
+        " if (id) { const node = document.getElementById(id); if (node) { try { node.scrollIntoView({block:'center'}); } catch (_e3) {} } }"
+        "} catch (_err) {} return true; })()"
+    )
+
+
 @dataclass(frozen=True)
 class BrowserSurfaceConfig:
     run_id: str
@@ -856,38 +908,24 @@ class BrowserSurfaceRuntime:
                 break
             time.sleep(0.1)
         payload = seed if isinstance(seed, dict) else {}
-        expression = (
-            "(() => { const seed = "
-            + json.dumps(payload, ensure_ascii=True)
-            + "; try {"
-            " const need = Math.max(0, Math.min(5, Number(seed.ensure_logs || 0)));"
-            " const keys = [];"
-            " try { for (let i = 0; i < localStorage.length; i += 1) keys.push(localStorage.key(i) || ''); } catch (_e) {}"
-            " const preferred = String(seed.storage_key || '');"
-            " const chosen = preferred && keys.includes(preferred) ? preferred : (keys[0] || preferred);"
-            " if (chosen && need > 0) {"
-            "   let raw = {}; try { raw = JSON.parse(localStorage.getItem(chosen) || '{}') || {}; } catch (_e2) { raw = {}; }"
-            "   const today = new Date().toISOString().slice(0, 10);"
-            "   if (raw.days && typeof raw.days === 'object') {"
-            "     let day = raw.days[today]; if (!day || typeof day !== 'object') day = {count:0,logs:[],goal:8};"
-            "     if (!Array.isArray(day.logs)) day.logs = [];"
-            "     while (day.logs.length < need) day.logs.push({time:'12:00',ts:Date.now()-day.logs.length*60000});"
-            "     day.count = Math.max(Number(day.count||0), day.logs.length); raw.days[today] = day;"
-            "   } else {"
-            "     const listKey = ['items','todos','tasks','records','list'].find((name) => Array.isArray(raw[name]));"
-            "     if (listKey) {"
-            "       while (raw[listKey].length < need) raw[listKey].push({id:'trial-'+Date.now(), title:'Trial item', name:'Trial item', text:'Trial item'});"
-            "     } else if (Array.isArray(raw)) {"
-            "       while (raw.length < need) raw.push({id:'trial-'+Date.now(), title:'Trial item'});"
-            "     }"
-            "   }"
-            "   localStorage.setItem(chosen, JSON.stringify(raw));"
-            " }"
-            " const id = String(seed.focus_id || '');"
-            " if (id) { const node = document.getElementById(id); if (node) { try { node.scrollIntoView({block:'center'}); } catch (_e3) {} } }"
-            "} catch (_err) {} return true; })()"
-        )
+        expression = trial_seed_apply_expression(payload)
         cdp.call("Runtime.evaluate", {"expression": expression, "returnByValue": True})
+        records = payload.get("records") if isinstance(payload.get("records"), list) else []
+        need = 0
+        with contextlib.suppress(TypeError, ValueError):
+            need = max(0, int(payload.get("ensure_count") or payload.get("ensure_logs") or 0))
+        if records or need > 0:
+            cdp.call("Page.reload", {"ignoreCache": False})
+            deadline = time.monotonic() + 12.0
+            while time.monotonic() < deadline:
+                ready = cdp.call(
+                    "Runtime.evaluate",
+                    {"expression": "document.readyState", "returnByValue": True},
+                )
+                value = ((ready.get("result") or {}).get("value"))
+                if value in {"interactive", "complete"}:
+                    break
+                time.sleep(0.1)
 
     def _page_health_snapshot(self) -> dict[str, Any]:
         """Return public page health without exposing page content or secrets."""
