@@ -1,15 +1,15 @@
 "use strict";
 
-const CACHE_NAME = "applooper-web-v208";
+const CACHE_NAME = "applooper-web-v209";
 const NAVIGATION_TIMEOUT_MS = 30_000;
 const ASSET_TIMEOUT_MS = 0;
 const APP_SHELL_CORE = [
   "./",
   "./index.html",
-  "./styles.css?v=208",
-  "./boot.js?v=208",
-  "./i18n.js?v=208",
-  "./app.js?v=208",
+  "./styles.css?v=209",
+  "./boot.js?v=209",
+  "./i18n.js?v=209",
+  "./app.js?v=209",
   "./manifest.webmanifest",
 ];
 const APP_SHELL_OPTIONAL = [
@@ -24,7 +24,9 @@ const APP_SHELL_OPTIONAL = [
   "./vendor/agent-avatars/virtual-user-student.png",
 ];
 
-const GATEWAY_ROUTE_SEGMENTS = new Set(["api"]);
+const GATEWAY_ROUTE_SEGMENTS = new Set([
+  "api",
+]);
 const GATEWAY_ASSETS = new Set();
 
 function scopeRelativePath(url) {

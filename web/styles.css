@@ -2388,6 +2388,9 @@ body.access-locked .skip-link {
 }
 
 .release-review-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0;
   padding: 14px 12px;
   border-radius: 10px;
@@ -2395,6 +2398,20 @@ body.access-locked .skip-link {
   color: #4a5a70;
   font-size: 0.82rem;
   font-weight: 650;
+}
+
+.release-review-loading-spinner {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #c5d4ea;
+  border-top-color: #3569ee;
+  border-radius: 50%;
+  animation: applooper-release-review-spin 0.7s linear infinite;
+}
+
+@keyframes applooper-release-review-spin {
+  to { transform: rotate(360deg); }
 }
 
 .release-verify-fail-note {
@@ -4405,6 +4422,13 @@ body.access-locked .skip-link {
   white-space: pre-wrap;
 }
 
+#experienceTwinVerifyDone.is-locked,
+#experienceTwinVerifyDone[aria-disabled="true"] {
+  opacity: 0.45;
+  filter: grayscale(0.15);
+  cursor: not-allowed;
+}
+
 .experience-twin-verify-actions {
   display: flex;
   flex: 0 0 auto;
@@ -4413,6 +4437,56 @@ body.access-locked .skip-link {
   justify-content: flex-end;
   gap: 8px;
   margin-left: auto;
+}
+
+.experience-twin-verify-surface-hint {
+  max-width: 14em;
+  overflow: hidden;
+  color: #8a5a00;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.experience-twin-view.needs-surface-trial {
+  position: relative;
+  overflow: visible;
+  color: #174b9a;
+  background: #eef4ff;
+  box-shadow: inset 0 0 0 2px #3569ee;
+  animation: applooper-surface-nudge .9s ease-in-out infinite;
+}
+
+.experience-twin-view.needs-surface-trial:before {
+  content: "↑";
+  position: absolute;
+  left: 50%;
+  top: calc(100% - 2px);
+  z-index: 6;
+  pointer-events: none;
+  color: #e3574d;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  transform: translate(-50%, 0);
+  text-shadow: 0 1px 0 #fff;
+}
+
+@keyframes applooper-surface-nudge {
+  0%, 100% {
+    background: #eef4ff;
+    box-shadow: inset 0 0 0 2px rgba(53, 105, 238, 0.45);
+  }
+  40% {
+    background: #dce8ff;
+    box-shadow: inset 0 0 0 3px rgba(53, 105, 238, 1), 0 0 0 6px rgba(53, 105, 238, 0.28);
+  }
+  70% {
+    background: #ffe9e6;
+    box-shadow: inset 0 0 0 2px rgba(227, 87, 77, 0.85), 0 0 0 6px rgba(227, 87, 77, 0.18);
+  }
 }
 
 .experience-twin-verify-actions .primary-button {

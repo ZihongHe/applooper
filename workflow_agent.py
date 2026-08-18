@@ -20,6 +20,7 @@ import math
 import mimetypes
 import os
 import queue
+import random
 import re
 import secrets
 import shlex
@@ -192,8 +193,9 @@ questions 只有在编排代码明确传入“已通过真实体验重大变更�
 STUDY_TREATMENT_CONDITION = "applooper_bound"
 STUDY_BASELINE_CONDITION = "claude_preview"
 STUDY_CONDITION_KEYS = frozenset({STUDY_TREATMENT_CONDITION, STUDY_BASELINE_CONDITION})
-APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_DEFAULT = 4
-APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_MAX = 8
+APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_DEFAULT = 20
+APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_MAX = 200
+TREATMENT_TEST_AGENT_ID = "development-test-agent"
 RELEASE_FAIL_DEVELOPMENTAL_TRIGGERS = frozenset(
     {
         "release_basic_failed",
@@ -847,6 +849,7 @@ ROLE_PROMPTS = {
 必须通过真实 Computer Use 完成端到端任务。输入提供 experience_twin 时，只通过其中的 Web Preview 和指定 views/route/viewport 体验，不得另行分支到 Android、iOS、鸿蒙或桌面原生运行时；Web 优先使用 Chrome。没有 Experience Twin 时，不得猜测或改用源码/API 冒充体验，应如实报告当前需要回到 Claude Code/Codex 原生环境体验。不得用读源码、curl 或 API 调用冒充 UI 体验。
 若 persona_initial_state.auth_mode 为 test_account，体验 task_script 前必须先按 auth_notes 使用指定 test_account 登录；同时必须覆盖注册/登录 CUJ：允许并鼓励在注册 UI 使用合成手机号 13800138000、合成邮箱 testuser@example.test、固定测试验证码 000000 或 staging 提供的 mock OTP，但禁止真实手机号、真实邮箱、真实 SMS/邮件轰炸与任何真实 PII。
 对注册/登录表单必须做字段类型 vs 错误文案横向校验：手机号字段不得提示邮箱格式错误，邮箱字段不得提示手机号格式错误；发现不一致必须作为 blocker 级问题上报。
+公开字段必须用第一人称、像真人在讲自己刚怎么用这个应用：先说自己用的是手机还是电脑、当时想办成什么事，再说卡在哪一步、点了什么却做不了。不要写成验收清单或「没做成：步骤」；公开 action/evidence/title/actual 里不要出现合成手机号、测试账号、验证码或内部步骤编号。
 逐项记录证据和截图，只提交自己真实感到不满意的问题。无法实际操作时必须报告失败，绝不能臆测成功。禁止调用交互式提问工具，禁止自行发送邮件或直接联系用户。""",
     "operations": """你是只读的运营智能体。你只负责读取已经配置并获准访问的上线目标、公开平台统计或授权数据源，整理真实运营指标、版本分布、异常和一个最值得执行的下一步建议。
 不得修改源码、发布版本、上传安装包、改变可见性、增加埋点、购买服务、联系真实用户或执行任何外部写操作。没有来源或授权时必须返回未配置或不可用，绝不能用体验者智能体、测试数据、推测值或示例值冒充真实用户数据。
@@ -919,6 +922,7 @@ The runnable experience must be an Experience Twin with runtime fixed to web_pre
 Complete end-to-end tasks through real Computer Use. When experience_twin is provided, experience only through its Web Preview and the specified views/route/viewport; do not branch into Android, iOS, HarmonyOS, or desktop-native runtimes; prefer Chrome on the web. Without an Experience Twin, do not guess or substitute source/API calls for experience; report that a native Claude Code/Codex environment is needed. Do not fake UI experience with source reading, curl, or API calls.
 If persona_initial_state.auth_mode is test_account, log in with that test account before the task_script, and cover the registration/login critical path using only synthetic test identities and the controlled verification flow; never use real phone numbers, real email, real SMS/email blasting, or any real PII.
 For registration/login forms, cross-check field type versus error copy: a phone field must not show an email-format error, and an email field must not show a phone-format error; inconsistencies are blocker-level issues.
+Public fields must read like a real person recounting the trial: say whether you used a phone or a computer, what you were trying to get done, and where you got stuck. Do not write a QA checklist or "I could not: step" lines. Do not put synthetic phone numbers, test accounts, OTPs, or internal step IDs in public action/evidence/title/actual.
 Record evidence and screenshots item by item, and submit only problems you actually encountered. If you cannot operate the UI, report failure; never invent success. Do not call interactive questioning tools, and do not email or directly contact users.""",
     "operations": """You are a read-only operations agent. You only read already configured and authorized launch targets, public platform statistics, or permitted data sources, then organize real operations metrics, version distribution, anomalies, and one highest-value next action.
 Do not modify source code, publish versions, upload packages, change visibility, add analytics, purchase services, contact real users, or perform any external write. Without a source or authorization, return unconfigured/unavailable; never substitute experience-agent data, test data, guesses, or examples for real user data.
@@ -1952,16 +1956,19 @@ def experience_public_report_instruction(locale: str) -> str:
 
     if app_i18n.normalize_locale(locale) == app_i18n.EN:
         return (
-            "action must be a concrete user-facing step written in English; if "
-            "task_script is in another language, paraphrase the same action in "
-            "English instead of copying it. evidence only states what you tapped "
-            "and what you saw, for example \"I tapped log water and today's count "
-            "became 3\". "
+            "action is the personal goal you were trying to finish, written in "
+            "English as that person would say it, for example \"I wanted to "
+            "register my profile so the app could match me\". If task_script is "
+            "in another language, paraphrase the same goal instead of copying "
+            "it. evidence is what happened at that moment, for example \"When I "
+            "tried to fill in my height, the next button stayed grey\". Do not "
+            "write checklist lines or synthetic test identities. "
         )
     return (
-        "action 必须用中文写用户能看懂的具体动作；若 task_script 是另一种语言，"
-        "按同样意思改写成中文，不要照抄原文。evidence 只写实际点了什么、看到了什么，"
-        "例如「点了记录喝水，今日杯数变成 3」。"
+        "action 写成这个人当时想办成的事，用中文第一人称，例如「我想先登记资料，"
+        "好方便帮我匹配」。若 task_script 是另一种语言，按同样意思改写，不要照抄。"
+        "evidence 写当时发生了什么，例如「当我填身高的时候，下一步按钮一直是灰的点不了」。"
+        "不要写成验收清单，也不要在公开字段里写合成手机号或测试账号。"
     )
 
 
@@ -2045,7 +2052,10 @@ def coding_role_prompt(
                 "must also be JSON arrays even when they contain zero or one item. Emit "
                 "one implementation task per independently tryable user-facing capability "
                 "(quick entry and a summary dashboard are two tasks, not one title joined "
-                "by 'and' or an equivalent conjunction). Add one deterministic "
+                "by 'and' or an equivalent conjunction). Task titles must name only the "
+                "user-facing feature a participant can try; never include internal "
+                "execution context such as P0/P1/P2/P3, ports, manifest-only, credentials, "
+                "Experience Twin, CUJ ids, or English variable names. Add one deterministic "
                 "verification task that depends on those implementation tasks. "
                 "Extract every explicit atomic "
                 "constraint in the user's intent as its own guardrail on the first attempt. "
@@ -2730,19 +2740,35 @@ def sync_paired_study_default_surface_records(
     return changed
 
 
-def developmental_experience_round_limit() -> int:
-    """Return the bounded AppLooper-only pre-release experience budget."""
+def developmental_experience_round_limit(state: dict[str, Any] | None = None) -> int:
+    """Return the single AppLooper loop budget.
 
-    try:
-        value = int(
-            os.environ.get(
-                "WF_APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS",
-                APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_DEFAULT,
+    One loop is a complete feedback-to-optimize cycle, not an internal
+    develop/review micro-tick. The workflow ``max_rounds`` is the source of
+    truth; the env var remains a test-only override.
+    """
+
+    fallback = APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_DEFAULT
+    if isinstance(state, dict):
+        with contextlib.suppress(TypeError, ValueError, OverflowError):
+            fallback = max(
+                1,
+                min(
+                    APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_MAX,
+                    int(state.get("max_rounds") or fallback),
+                ),
             )
-        )
-    except (TypeError, ValueError):
-        value = APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_DEFAULT
-    return max(0, min(APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_MAX, value))
+    raw = os.environ.get("WF_APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS")
+    if raw not in {None, ""}:
+        with contextlib.suppress(TypeError, ValueError, OverflowError):
+            return max(0, min(APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_MAX, int(raw)))
+    return fallback
+
+
+def treatment_loop_count(state: dict[str, Any]) -> int:
+    with contextlib.suppress(TypeError, ValueError, OverflowError):
+        return max(0, int(state.get("developmental_experience_rounds") or 0))
+    return 0
 
 
 def study_preview_port(state: dict[str, Any]) -> int | None:
@@ -3223,46 +3249,6 @@ def agent_timeout_seconds(state: dict[str, Any]) -> int:
     return 3600
 
 
-def agent_timeout_seconds_for_role(state: dict[str, Any], role: str) -> int:
-    """Keep optional read-only helpers from blocking the whole workflow.
-
-    Developer and Computer Use turns may legitimately take much longer.  A
-    schema-only helper has no such justification: if its provider stalls, the
-    workflow should reach the next safe checkpoint and apply its deterministic
-    fallback instead of appearing frozen for the global one-hour limit.
-    """
-
-    timeout = agent_timeout_seconds(state)
-    if is_experience_persona_role(role):
-        return experience_persona_timeout_seconds(state)
-    if role == "reviewer":
-        # Deep release evaluation is capped separately from the global agent
-        # timeout. Default is 20 minutes so a stalled provider cannot hold the
-        # participant workflow for the legacy one-hour global timeout.
-        with contextlib.suppress(TypeError, ValueError):
-            reviewer_timeout = int(
-                os.environ.get(
-                    "WF_REVIEWER_TIMEOUT",
-                    str(RELEASE_DEEP_TIMEOUT_SECONDS),
-                )
-            )
-            return max(
-                30,
-                min(timeout, reviewer_timeout, RELEASE_DEEP_TIMEOUT_SECONDS),
-            )
-        return min(timeout, RELEASE_DEEP_TIMEOUT_SECONDS)
-    if role not in {
-        "test_maintainer",
-        "internal_test_analyst",
-        "owner_feedback_precheck",
-    }:
-        return timeout
-    with contextlib.suppress(TypeError, ValueError):
-        helper_timeout = int(os.environ.get("WF_READONLY_HELPER_TIMEOUT", "180"))
-        return max(30, min(timeout, helper_timeout, 15 * 60))
-    return min(timeout, 180)
-
-
 def is_experience_persona_role(role: str) -> bool:
     text = str(role or "")
     return text == "experience" or text.startswith("experience:")
@@ -3316,6 +3302,48 @@ def treatment_experience_wave_close_after(state: dict[str, Any] | None = None) -
             ),
         )
     return min(TREATMENT_EXPERIENCE_WAVE_CLOSE_AFTER, size)
+
+
+def agent_timeout_seconds_for_role(state: dict[str, Any], role: str) -> int:
+    """Keep optional read-only helpers from blocking the whole workflow.
+
+    Developer and Computer Use turns may legitimately take much longer.  A
+    schema-only helper has no such justification: if its provider stalls, the
+    workflow should reach the next safe checkpoint and apply its deterministic
+    fallback instead of appearing frozen for the global one-hour limit.
+    Virtual-user experience turns are separately capped so one hung browser
+    session cannot hold the loop for the global timeout.
+    """
+
+    timeout = agent_timeout_seconds(state)
+    if is_experience_persona_role(role):
+        return experience_persona_timeout_seconds(state)
+    if role == "reviewer":
+        # Deep release evaluation is capped separately from the global agent
+        # timeout. Default is 20 minutes so a stalled provider cannot hold the
+        # participant workflow for the legacy one-hour global timeout.
+        with contextlib.suppress(TypeError, ValueError):
+            reviewer_timeout = int(
+                os.environ.get(
+                    "WF_REVIEWER_TIMEOUT",
+                    str(RELEASE_DEEP_TIMEOUT_SECONDS),
+                )
+            )
+            return max(
+                30,
+                min(timeout, reviewer_timeout, RELEASE_DEEP_TIMEOUT_SECONDS),
+            )
+        return min(timeout, RELEASE_DEEP_TIMEOUT_SECONDS)
+    if role not in {
+        "test_maintainer",
+        "internal_test_analyst",
+        "owner_feedback_precheck",
+    }:
+        return timeout
+    with contextlib.suppress(TypeError, ValueError):
+        helper_timeout = int(os.environ.get("WF_READONLY_HELPER_TIMEOUT", "180"))
+        return max(30, min(timeout, helper_timeout, 15 * 60))
+    return min(timeout, 180)
 
 
 def reviewer_transport_attempts_per_turn() -> int:
@@ -4492,17 +4520,23 @@ def record_ready_to_publish_release(
     return existing, created
 
 
-def finalize_strict_round_limit_as_reviewable_prototype(state: dict[str, Any]) -> bool:
-    """Force the current candidate into pending-publish at the 50-step cap.
+def _freeze_reviewable_prototype(
+    state: dict[str, Any],
+    *,
+    reason: str,
+    freeze_reason: str,
+    handoff_key: str,
+    event_name: str,
+    current: Any,
+    next_step: Any,
+    created_at: str = "",
+) -> bool:
+    """Freeze the latest candidate as owner-reviewable pending publish."""
 
-    When the relevant agents have not yet agreed to release, the study still
-    freezes the latest candidate as ready_to_publish so the owner can accept it.
-    """
-
-    if not state.get("strict_round_limit_reached"):
-        return False
-    handoff = state.get("strict_round_limit_handoff")
+    handoff = state.get(handoff_key)
     if isinstance(handoff, dict) and handoff.get("completed"):
+        return False
+    if str(state.get("phase") or "") in {"DELIVERED", "STOPPED"}:
         return False
     readiness = candidate_readiness_state(state)
     candidate = str(
@@ -4518,16 +4552,14 @@ def finalize_strict_round_limit_as_reviewable_prototype(state: dict[str, Any]) -
         state,
         candidate,
         (state.get("last_developer") or {}).get("changes") or [],
-        created_at=str(state.get("strict_round_limit_reached_at") or utcnow()),
+        created_at=str(created_at or utcnow()),
     )
     release.update({
         "reviewable_prototype": True,
         "threshold_met": False,
-        "selection_reason": "max_loops_forced_pending_publish",
-        "freeze_reason": "max_loops_forced",
+        "selection_reason": reason,
+        "freeze_reason": freeze_reason,
     })
-    # Keep the lifecycle object holding the same release object; normalizing on
-    # a later read preserves the bounded metadata above.
     state["delivered_candidate"] = candidate
     state["phase"] = "DELIVERED"
     state["status"] = "delivered_listening"
@@ -4537,20 +4569,48 @@ def finalize_strict_round_limit_as_reviewable_prototype(state: dict[str, Any]) -
         state,
         "owner_review_ready",
         candidate_id=candidate,
-        reason="max_loops_forced_pending_publish",
+        reason=reason,
     )
-    state["strict_round_limit_handoff"] = {
+    state[handoff_key] = {
         "completed": True,
         "completed_at": utcnow(),
         "candidate_id": candidate,
         "release_id": str(release.get("id") or ""),
         "reviewable_prototype": True,
         "threshold_met": False,
-        "freeze_reason": "max_loops_forced",
+        "freeze_reason": freeze_reason,
     }
     set_public_work_summary(
         state,
         kind="confirmation",
+        current=current,
+        next_step=next_step,
+    )
+    event(
+        state,
+        event_name,
+        candidate_id=candidate,
+        release_id=str(release.get("id") or ""),
+        reason=reason,
+    )
+    return True
+
+
+def finalize_strict_round_limit_as_reviewable_prototype(state: dict[str, Any]) -> bool:
+    """Force the current candidate into pending-publish at the 50-step cap.
+
+    When the relevant agents have not yet agreed to release, the study still
+    freezes the latest candidate as ready_to_publish so the owner can accept it.
+    """
+
+    if not state.get("strict_round_limit_reached"):
+        return False
+    return _freeze_reviewable_prototype(
+        state,
+        reason="max_loops_forced_pending_publish",
+        freeze_reason="max_loops_forced",
+        handoff_key="strict_round_limit_handoff",
+        event_name="strict_round_limit_reviewable_prototype_created",
         current=app_i18n.pair(
             f"已达到预设的 {int(state.get('max_rounds') or 0)} 步上限；当前候选已冻结并转入待发布",
             f"The configured {int(state.get('max_rounds') or 0)}-step limit was reached; the current candidate is frozen and moved to pending publish",
@@ -4559,15 +4619,61 @@ def finalize_strict_round_limit_as_reviewable_prototype(state: dict[str, Any]) -
             "请进入发布页完成验收。满步后即使相关智能体尚未同意发布，也会转入待发布。",
             "Open Launch to complete acceptance. At the step cap the candidate moves to pending publish even if the relevant agents have not yet agreed to release.",
         ),
+        created_at=str(state.get("strict_round_limit_reached_at") or utcnow()),
     )
-    event(
+
+
+STAGNANT_VERIFY_FREEZE_ROUNDS = 3
+_INFRA_TASK_TITLE_RE = re.compile(
+    r"(?:127\.0\.0\.1|localhost|端口|预览绑定|preview|port\s*\d+|HTTP\s*200|截图)",
+    re.I,
+)
+
+
+def product_tasks_ready_for_pending_publish(state: dict[str, Any]) -> bool:
+    """True when a product capability exists and further verify-only loops add nothing."""
+
+    last = state.get("last_developer") if isinstance(state.get("last_developer"), dict) else {}
+    if last.get("ready_for_review"):
+        return True
+    tasks = [row for row in (state.get("tasks") or []) if isinstance(row, dict)]
+    product = [
+        row
+        for row in tasks
+        if not _INFRA_TASK_TITLE_RE.search(str(row.get("title") or ""))
+    ]
+    pool = product or tasks
+    return any(task_is_implemented(row) for row in pool)
+
+
+def finalize_stagnant_verify_as_reviewable_prototype(state: dict[str, Any]) -> bool:
+    """Stop looping when consecutive rounds only repeat last-loop verification."""
+
+    if study_multi_agent_treatment_enabled(state):
+        if isinstance(state.get("pending_treatment_loop"), dict):
+            return False
+        if isinstance(state.get("developmental_experience"), dict):
+            return False
+    reporting = progress_reporting_state(state)
+    if int(reporting.get("stagnant_verify_rounds") or 0) < STAGNANT_VERIFY_FREEZE_ROUNDS:
+        return False
+    if not product_tasks_ready_for_pending_publish(state):
+        return False
+    return _freeze_reviewable_prototype(
         state,
-        "strict_round_limit_reviewable_prototype_created",
-        candidate_id=candidate,
-        release_id=str(release.get("id") or ""),
-        limit=int(state.get("max_rounds") or 0),
+        reason="stagnant_verify_pending_publish",
+        freeze_reason="stagnant_verify_loops",
+        handoff_key="stagnant_verify_handoff",
+        event_name="stagnant_verify_reviewable_prototype_created",
+        current=app_i18n.pair(
+            "连续几轮没有新的产品变化，当前版本已冻结并转入待发布",
+            "Several rounds added no new product changes; the current build is frozen and moved to pending publish",
+        ),
+        next_step=app_i18n.pair(
+            "请进入发布页完成验收。无增量的验证轮次不再继续空转。",
+            "Open Launch to complete acceptance. Verify-only loops no longer keep spinning.",
+        ),
     )
-    return True
 
 
 def _release_evidence_persona_name(state: dict[str, Any], persona_id: str) -> str:
@@ -6385,10 +6491,17 @@ class AgentExecutionLock:
     racing a read-only review makes the review's before/after fingerprint look
     like the reviewer edited source. Serialize the actual CLI turns while still
     allowing UI/state polling and preparation queuing to remain concurrent.
+
+    Named virtual-user ``experience:`` roles only lock their own session. They
+    are read-only against the candidate tree and may run at the same time.
     """
 
-    def __init__(self, run_id: str, timeout: float = 7_200.0):
-        self.path = run_dir(run_id) / "agent-execution.lock"
+    def __init__(self, run_id: str, timeout: float = 7_200.0, role: str = ""):
+        if str(role or "").startswith("experience:"):
+            safe = re.sub(r"[^A-Za-z0-9._-]+", "-", str(role))[:96].strip("-") or "experience"
+            self.path = run_dir(run_id) / f"agent-execution-{safe}.lock"
+        else:
+            self.path = run_dir(run_id) / "agent-execution.lock"
         self.timeout = max(1.0, float(timeout))
         self.fp: Any = None
 
@@ -7700,14 +7813,34 @@ def read_guardrail_rows(state: dict[str, Any], *, recover_tail: bool = False) ->
         if isinstance(row, dict) and row.get("run_id") == state["run_id"]:
             rows.append(row)
     if recover_tail and bad_tail:
-        tmp = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
-        with tmp.open("w", encoding="utf-8", newline="\n") as f:
-            for row in rows:
-                f.write(json.dumps(row, ensure_ascii=False) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
+        _publish_text_file(
+            path,
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        )
     return rows
+
+
+def _publish_text_file(path: Path, text: str) -> None:
+    """Atomically replace a text file, recreating a vanished parent directory."""
+
+    tmp = path.with_suffix(path.suffix + f".{os.getpid()}.tmp")
+    last_error: Exception | None = None
+    for attempt in range(6):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with tmp.open("w", encoding="utf-8", newline="\n") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+            return
+        except FileNotFoundError as exc:
+            last_error = exc
+            with contextlib.suppress(FileNotFoundError):
+                tmp.unlink()
+            time.sleep(min(0.05 * (2**attempt), 0.4))
+    if last_error is not None:
+        raise last_error
 
 
 def sync_guardrail_mirror(state: dict[str, Any], rows: list[dict[str, Any]] | None = None) -> None:
@@ -7715,15 +7848,22 @@ def sync_guardrail_mirror(state: dict[str, Any], rows: list[dict[str, Any]] | No
     store = Path(state.get("guardrail_store") or mirror)
     if mirror == store:
         return
-    mirror.parent.mkdir(parents=True, exist_ok=True)
     rows = read_guardrail_rows(state, recover_tail=True) if rows is None else rows
-    tmp = mirror.with_suffix(mirror.suffix + f".{os.getpid()}.tmp")
-    with tmp.open("w", encoding="utf-8", newline="\n") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, mirror)
+    try:
+        _publish_text_file(
+            mirror,
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        )
+    except OSError as exc:
+        # The trial workspace can disappear during preview rebind. The durable
+        # store remains authoritative, so a vanished mirror must not restart
+        # the whole worker.
+        event(
+            state,
+            "guardrail_mirror_skipped",
+            error=str(exc)[:240],
+            path=str(mirror),
+        )
 
 
 def append_guardrail(
@@ -11901,13 +12041,18 @@ def call_claude(
     allowed_tools: list[str] | None = None,
 ) -> dict[str, Any]:
     run_id = str(state["run_id"])
-    with AgentExecutionLock(run_id):
+    if role.startswith("experience:") and not (
+        isinstance(state.get("_namespace_state_writer"), dict)
+        and state["_namespace_state_writer"].get("session_roles")
+    ):
+        state["_namespace_state_writer"] = {"session_roles": [role]}
+    with AgentExecutionLock(run_id, role=role):
         namespace_writer = (
             state.get("_namespace_state_writer")
             if isinstance(state.get("_namespace_state_writer"), dict)
             else {}
         )
-        if namespace_writer:
+        if namespace_writer and state_path(run_id).is_file():
             # The Web helper may have waited behind a workflow agent turn. Its
             # pre-lock snapshot and role session are stale at that point, so
             # refresh before selecting provider/session or making any internal
@@ -12658,6 +12803,55 @@ def persona_public_payload(persona: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in persona.items() if not str(key).startswith("_")}
 
 
+_PERSONA_MOBILE_DEVICE_RE = re.compile(
+    r"手机|行動|移动|iphone|android|ipad|\bmobile\b|\bphone\b|\bh5\b",
+    re.IGNORECASE,
+)
+_PERSONA_DESKTOP_DEVICE_RE = re.compile(
+    r"电脑|電腦|台式|笔记本|windows|\bmac\b|desktop|\bpc\b|laptop",
+    re.IGNORECASE,
+)
+
+
+def infer_persona_trial_surface(persona: dict[str, Any]) -> str:
+    """Map a virtual user onto desktop_web or mobile_web without inventing a new person."""
+
+    existing = str(persona.get("trial_surface") or persona.get("experience_surface") or "").strip()
+    if existing in {"desktop_web", "mobile_web"}:
+        return existing
+    parts = [
+        str(persona.get("device") or ""),
+        str(persona.get("constraints") or ""),
+        str(persona.get("habits") or ""),
+    ]
+    device_i18n = persona.get("device_i18n")
+    if isinstance(device_i18n, dict):
+        parts.extend(str(value or "") for value in device_i18n.values())
+    blob = " ".join(parts)
+    mobile = bool(_PERSONA_MOBILE_DEVICE_RE.search(blob))
+    desktop = bool(_PERSONA_DESKTOP_DEVICE_RE.search(blob))
+    if mobile and not desktop:
+        return "mobile_web"
+    if desktop and not mobile:
+        return "desktop_web"
+    return ""
+
+
+def assign_persona_trial_surfaces(personas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep some virtual users on desktop web and some on phone web."""
+
+    rows = [dict(item) for item in personas if isinstance(item, dict)]
+    assigned = [infer_persona_trial_surface(item) for item in rows]
+    unset = [index for index, surface in enumerate(assigned) if not surface]
+    for offset, index in enumerate(unset):
+        assigned[index] = "desktop_web" if offset % 2 == 0 else "mobile_web"
+    if len(rows) >= 2 and len({item for item in assigned if item}) < 2:
+        assigned[-1] = "mobile_web" if assigned[0] == "desktop_web" else "desktop_web"
+    for persona, surface in zip(rows, assigned):
+        persona["trial_surface"] = surface or "desktop_web"
+    return rows
+
+
 def finalize_persona(raw: dict[str, Any], *, index: int = 0) -> dict[str, Any]:
     persona = dict(raw)
     persona["id"] = re.sub(r"[^a-zA-Z0-9_-]", "-", str(persona.get("id") or f"p{index:02d}"))[:40] or f"p{index:02d}"
@@ -12879,8 +13073,11 @@ def generate_study_persona_cohort(
             "Do not copy the participant's real identity or invent the participant's demographics. "
             "Each person must be a distinct everyday user of THIS app, with a unique name, role, "
             "scenario, motivation, constraints, habits, and a short task_script of concrete UI actions. "
+            "Split the cohort across devices: about half primarily use a computer browser (desktop_web), "
+            "about half a phone browser (mobile_web). Encode that split in each person's device field. "
             "Write bilingual zh-CN/en fields. English values must contain no Chinese characters. "
-            "task_script actions must be ordinary user actions on this app, not architecture or developer work."
+            "task_script actions must be ordinary user actions on this app, not architecture or developer work. "
+            + public_bubble_language_instruction(locale)
         ),
         "owner_brief": brief,
         "ui_locale": locale,
@@ -12957,7 +13154,7 @@ def generate_study_persona_cohort(
         persona["audience_source"] = brief.get("audience") or ""
         persona["app_type_source"] = brief.get("app_type") or ""
         expanded.append(finalize_persona(persona, index=index))
-    return expanded
+    return assign_persona_trial_surfaces(expanded)
 
 
 def materialize_study_persona_cohort(
@@ -12974,13 +13171,15 @@ def materialize_study_persona_cohort(
         if isinstance(item, dict)
     ]
     if not should_expand_study_persona_cohort(state):
-        return source
+        return assign_persona_trial_surfaces(source)
     if study_persona_cohort_is_current(state, source):
-        return source
+        assigned = assign_persona_trial_surfaces(source)
+        state["personas"] = assigned
+        return assigned
     if not generate:
-        return source
+        return assign_persona_trial_surfaces(source)
     if not source and not any(study_owner_app_brief(state).values()):
-        return source
+        return assign_persona_trial_surfaces(source)
     try:
         expanded = generate_study_persona_cohort(state, source)
     except (WorkflowStopRequested, FatalWorkflowError):
@@ -12991,9 +13190,11 @@ def materialize_study_persona_cohort(
             "study_persona_cohort_generate_failed",
             error=f"{type(exc).__name__}: {exc}"[:500],
         )
-        return source
+        return assign_persona_trial_surfaces(source)
     state["study_persona_cohort_version"] = STUDY_PERSONA_COHORT_VERSION
-    return expanded
+    assigned = assign_persona_trial_surfaces(expanded)
+    state["personas"] = assigned
+    return assigned
 
 
 def _bounded_string_list(value: Any, *, limit: int = 16, chars: int = 240) -> list[str]:
@@ -13787,11 +13988,46 @@ def _progress_digest_focus(state: dict[str, Any]) -> str:
 
 
 def _progress_digest_round(state: dict[str, Any]) -> int:
+    if study_multi_agent_treatment_enabled(state):
+        return treatment_loop_count(state)
     reporting = progress_reporting_state(state)
     return max(
         0,
         int(reporting.get("last_round") or reporting.get("latest_round") or state.get("round") or 0),
     )
+
+
+def _progress_item_fingerprint(text: str) -> str:
+    return re.sub(r"\s+", "", _humanize_progress_line(text).casefold())[:160]
+
+
+def progress_loop_product_delta(state: dict[str, Any], pending_items: list[str]) -> list[str]:
+    """Keep only product changes that are new versus the previous loop."""
+
+    reporting = progress_reporting_state(state)
+    previous = {
+        str(item)
+        for item in (reporting.get("last_loop_item_fingerprints") or [])
+        if str(item)
+    }
+    delta: list[str] = []
+    for raw in pending_items:
+        item = _humanize_progress_line(raw)
+        compact = re.sub(r"\s+", "", item)
+        if (
+            not item
+            or item in _PROGRESS_GENERIC_ITEMS
+            or len(compact) < 4
+            or _PROGRESS_GLUE_ONLY.fullmatch(compact)
+            or _PROGRESS_VERIFY_ONLY_RE.search(item)
+        ):
+            continue
+        fingerprint = _progress_item_fingerprint(item)
+        if not fingerprint or fingerprint in previous:
+            continue
+        if item not in delta:
+            delta.append(item)
+    return delta
 
 
 def build_progress_digest_summary(state: dict[str, Any], pending_items: list[str]) -> str:
@@ -14055,7 +14291,23 @@ def maybe_flush_progress_digest(
     threshold = progress_flush_threshold(state)
     if not force and int(reporting.get("milestones_since_flush") or 0) < threshold:
         return False
-    body = build_progress_digest_summary(state, pending_items)
+    current_fingerprints = [
+        fingerprint
+        for fingerprint in (_progress_item_fingerprint(item) for item in pending_items)
+        if fingerprint
+    ]
+    delta = progress_loop_product_delta(state, pending_items)
+    reporting["last_loop_item_fingerprints"] = current_fingerprints[-12:]
+    if not delta:
+        reporting["stagnant_verify_rounds"] = int(reporting.get("stagnant_verify_rounds") or 0) + 1
+        reporting["pending_items"] = []
+        reporting["pending_attachments"] = []
+        reporting["pending_rounds"] = 0
+        reporting["milestones_since_flush"] = 0
+        save_state(state)
+        return False
+    reporting["stagnant_verify_rounds"] = 0
+    body = build_progress_digest_summary(state, delta)
     upsert_progress_digest_notice(
         state,
         mailer,
@@ -16328,6 +16580,39 @@ def schedule_test_maintainer(state: dict[str, Any]) -> dict[str, Any] | None:
     return apply_test_maintainer_contract(state, contract)
 
 
+def _treatment_agent_display_name(state: dict[str, Any], agent_id: str) -> str:
+    if agent_id == TREATMENT_TEST_AGENT_ID:
+        return "测试智能体"
+    for item in state.get("personas") or []:
+        if isinstance(item, dict) and str(item.get("id") or "") == agent_id:
+            return public_field(item.get("name")) or "体验者"
+    return "体验者"
+
+
+def _treatment_loop_participants(state: dict[str, Any], feedback: list[dict[str, Any]]) -> list[str]:
+    pending = state.get("pending_treatment_loop") if isinstance(state.get("pending_treatment_loop"), dict) else {}
+    ordered: list[str] = []
+    for raw in list(pending.get("agent_ids") or []):
+        agent_id = str(raw or "").strip()
+        if agent_id and agent_id not in ordered:
+            ordered.append(agent_id)
+    for row in feedback:
+        if not isinstance(row, dict):
+            continue
+        agent_id = str(row.get("persona_id") or "").strip()
+        if agent_id and agent_id not in ordered:
+            ordered.append(agent_id)
+    for persona in state.get("personas") or []:
+        if not isinstance(persona, dict):
+            continue
+        agent_id = str(persona.get("id") or "").strip()
+        if agent_id and agent_id not in ordered:
+            ordered.append(agent_id)
+    if TREATMENT_TEST_AGENT_ID not in ordered:
+        ordered.insert(0, TREATMENT_TEST_AGENT_ID)
+    return ordered
+
+
 def send_developer_feedback_updates(
     state: dict[str, Any],
     mailer: Mailer | WebChannel,
@@ -16337,33 +16622,141 @@ def send_developer_feedback_updates(
 ) -> None:
     grouped: dict[str, list[str]] = {}
     for row in feedback:
-        if not isinstance(row, dict) or row.get("source") != "experience":
+        if not isinstance(row, dict):
             continue
         persona_id = str(row.get("persona_id") or "")
-        titles = [public_mail_text(issue.get("title"), "") for issue in row.get("issues") or [] if isinstance(issue, dict)]
-        if persona_id and any(titles):
-            grouped.setdefault(persona_id, []).extend(title for title in titles if title)
-    personas = {str(item.get("id") or ""): item for item in state.get("personas") or [] if isinstance(item, dict)}
+        if not persona_id:
+            if row.get("source") in {"tester", "internal_test"}:
+                persona_id = TREATMENT_TEST_AGENT_ID
+            else:
+                continue
+        titles = [
+            public_mail_text(issue.get("title"), "")
+            for issue in row.get("issues") or []
+            if isinstance(issue, dict)
+        ]
+        grouped.setdefault(persona_id, []).extend(title for title in titles if title)
     public_changes = [public_mail_text(item, "") for item in changes]
     public_changes = [item for item in public_changes if item][:3]
-    for persona_id, raw_titles in grouped.items():
-        titles = list(dict.fromkeys(raw_titles))[:3]
-        persona = personas.get(persona_id, {})
-        persona_name = public_field(persona.get("name")) or "体验者"
-        body = f"你之前提出的“{'、'.join(titles)}”相关功能已更新。"
+    if not study_multi_agent_treatment_enabled(state):
+        personas = {
+            str(item.get("id") or ""): item
+            for item in state.get("personas") or []
+            if isinstance(item, dict)
+        }
+        for persona_id, raw_titles in grouped.items():
+            titles = list(dict.fromkeys(raw_titles))[:3]
+            if not titles:
+                continue
+            persona = personas.get(persona_id, {})
+            persona_name = public_field(persona.get("name")) or "体验者"
+            body = f"你之前提出的“{'、'.join(titles)}”相关功能已更新。"
+            if public_changes:
+                body += "\n\n本轮更新：\n" + "\n".join(f"- {item}" for item in public_changes)
+            fingerprint = hashlib.sha256(
+                json.dumps({"titles": titles, "changes": public_changes}, ensure_ascii=False, sort_keys=True).encode()
+            ).hexdigest()[:16]
+            mailer.send(
+                state,
+                f"研发更新 · {persona_name}",
+                body,
+                key=f"developer-feedback-update:{state.get('round', 0)}:{persona_id}:{fingerprint}",
+                attachments=attachments,
+                channel=f"experience:{persona_id}",
+                actor="developer",
+                persona_name=persona_name,
+            )
+        return
+    loop_num = treatment_loop_count(state) + (
+        1 if isinstance(state.get("pending_treatment_loop"), dict) else 0
+    )
+    english = prompt_ui_locale(state) == "en"
+    for persona_id in _treatment_loop_participants(state, feedback):
+        titles = list(dict.fromkeys(grouped.get(persona_id) or []))[:3]
+        persona_name = _treatment_agent_display_name(state, persona_id)
+        mention = f"@{persona_name}"
+        if titles:
+            quoted = "、".join(titles)
+            body = (
+                f"{mention} I updated the items you flagged: “{quoted}”."
+                if english
+                else f"{mention} 你反馈的“{quoted}”我已经按你的视角改过了。"
+            )
+        else:
+            body = (
+                f"{mention} I checked the version against your trial; nothing from your pass needed a change."
+                if english
+                else f"{mention} 我按你的试用视角核对了当前版本，你这轮没有需要单独改的问题。"
+            )
         if public_changes:
-            body += "\n\n本轮更新：\n" + "\n".join(f"- {item}" for item in public_changes)
-        fingerprint = hashlib.sha256(json.dumps({"titles": titles, "changes": public_changes}, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
+            body += (
+                "\n\nThis loop:\n" + "\n".join(f"- {item}" for item in public_changes)
+                if english
+                else "\n\n本轮统一优化：\n" + "\n".join(f"- {item}" for item in public_changes)
+            )
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {"titles": titles, "changes": public_changes, "loop": loop_num},
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()[:16]
+        channel = (
+            "experience:updates"
+            if persona_id == TREATMENT_TEST_AGENT_ID
+            else f"experience:{persona_id}"
+        )
         mailer.send(
             state,
-            f"研发更新 · {persona_name}",
+            f"研发更新 · {persona_name}" if not english else f"Developer update · {persona_name}",
             body,
-            key=f"developer-feedback-update:{state.get('round', 0)}:{persona_id}:{fingerprint}",
+            key=f"developer-feedback-update:{loop_num}:{persona_id}:{fingerprint}",
             attachments=attachments,
-            channel=f"experience:{persona_id}",
+            channel=channel,
             actor="developer",
             persona_name=persona_name,
+            meta={"pm_mentions": [persona_id, persona_name], "pm_bubble": body},
         )
+
+
+def close_treatment_loop(
+    state: dict[str, Any],
+    mailer: Mailer | WebChannel,
+    changes: list[Any],
+    attachments: list[str],
+) -> bool:
+    """Count one AppLooper loop only after feedback plus a unified developer reply."""
+
+    if not study_multi_agent_treatment_enabled(state):
+        return False
+    pending = state.get("pending_treatment_loop")
+    if not isinstance(pending, dict):
+        return False
+    feedback = [
+        row
+        for row in (pending.get("feedback") or state.get("feedback") or [])
+        if isinstance(row, dict)
+    ]
+    send_developer_feedback_updates(state, mailer, feedback, changes, attachments)
+    next_loop = treatment_loop_count(state) + 1
+    state["developmental_experience_rounds"] = next_loop
+    state["round"] = next_loop
+    reporting = progress_reporting_state(state)
+    reporting["last_round"] = next_loop
+    reporting["latest_round"] = next_loop
+    maybe_flush_progress_digest(state, mailer, force=True)
+    state.pop("pending_treatment_loop", None)
+    if finalize_stagnant_verify_as_reviewable_prototype(state):
+        event(state, "treatment_loop_closed_then_frozen", loop=next_loop)
+        return True
+    event(
+        state,
+        "treatment_loop_closed",
+        loop=next_loop,
+        agents=len(_treatment_loop_participants(state, feedback)),
+        feedback_rows=len(feedback),
+    )
+    return True
 
 
 def deferred_feedback_keys(state: dict[str, Any], feedback_id: str) -> set[str]:
@@ -17818,6 +18211,62 @@ def message_only_developer_reply(state: dict[str, Any], body: str) -> tuple[str,
     )
 
 
+def developer_welcome_copy(state: dict[str, Any]) -> tuple[str, str]:
+    """First Development-tab bubble: start work, wait time, and where to try it."""
+
+    intent = str(state.get("intent") or "").strip()
+    english = prompt_ui_locale(state) == "en"
+    title = "Development started" if english else "研发已开始"
+    if english:
+        body = (
+            f"The developer agent has started building: {intent}\n\n"
+            "The first version usually takes about half an hour. You can leave this page "
+            "in the meantime; development continues. After that first delivery, you can "
+            "try the app online in the Trial tab. Test agents and representative users "
+            "will then try it and send clear feedback here. You can add ideas at any time."
+        )
+    else:
+        body = (
+            f"研发智能体已经开始构建：{intent}\n\n"
+            "初版交付大约需要半个小时。这段时间你可以先挂起或离开页面，系统会继续研发。"
+            "初版交付后，你可以在「试用」页签在线体验我交付的应用。"
+            "随后测试智能体和具有代表性的虚拟用户会实际试用，并把清晰的反馈发到这里。你也可以随时补充想法。"
+        )
+    return title, body
+
+
+def welcome_mentions_first_delivery_wait(text: str) -> bool:
+    value = str(text or "")
+    return "半个小时" in value or "half an hour" in value
+
+
+def ensure_developer_welcome(state: dict[str, Any], mailer: Mailer | WebChannel) -> None:
+    """Send or refresh the starting developer bubble so the wait time is visible."""
+
+    title, body = developer_welcome_copy(state)
+    outbox = state.get("web_outbox") if isinstance(state.get("web_outbox"), dict) else {}
+    record = outbox.get("welcome") if isinstance(outbox, dict) else None
+    if isinstance(record, dict) and welcome_mentions_first_delivery_wait(str(record.get("body") or "")):
+        state["welcome_sent"] = True
+        return
+    if isinstance(record, dict):
+        record["title"] = title
+        record["body"] = body
+        ledger = state.get("conversation_ledger")
+        if isinstance(ledger, dict):
+            for row in ledger.values():
+                if isinstance(row, dict) and str(row.get("outbox_key") or "") == "welcome":
+                    row["title"] = title
+                    row["subject"] = title
+                    row["body"] = body
+        state["welcome_sent"] = True
+        save_state(state)
+        return
+    mailer.send(state, title, body, key="welcome", actor="orchestrator")
+    state["welcome_sent"] = True
+    save_state(state)
+
+
 def handle_mail(state: dict[str, Any], mailer: Mailer | WebChannel, message: dict[str, Any]) -> None:
     origin_phase = state.get("phase")
     ledger_key = f"in:{message['message_id']}"
@@ -18319,6 +18768,49 @@ def complete_developer_message_resume_gate(
     return True
 
 
+def is_owner_trial_jump_text(text: str) -> bool:
+    """Return True for convenience trial-jump copy, not an R&D requirement."""
+
+    blob = str(text or "")
+    return "【所有者试用跳转】" in blob or "[Owner trial jump]" in blob
+
+
+def dismiss_owner_trial_jump_queue(state: dict[str, Any]) -> int:
+    """Close queued trial-jump rows without starting a developer turn."""
+
+    normalize_developer_message_queue(state)
+    dismissed = 0
+    now = utcnow()
+    for row in state.get("developer_message_queue") or []:
+        if not isinstance(row, dict):
+            continue
+        if row.get("user_message_state") not in {"unread", "processing"}:
+            continue
+        message = row.get("message") if isinstance(row.get("message"), dict) else {}
+        if not is_owner_trial_jump_text(str(message.get("body") or "")):
+            continue
+        message_id = str(row.get("message_id") or message.get("message_id") or "")
+        row["user_message_state"] = "replied"
+        row["replied_at"] = now
+        row["handling_status"] = "trial_jump_ignored"
+        row["reply_attempt_in_progress"] = False
+        ledger_upsert(
+            state,
+            f"in:{message_id}",
+            processing_status="trial_jump_ignored",
+            user_message_state="replied",
+            agent_read=True,
+            agent_processed=True,
+            agent_replied=False,
+            handling_status="trial_jump_ignored",
+        )
+        event(state, "owner_trial_jump_ignored", message_id=message_id)
+        dismissed += 1
+    if dismissed:
+        update_user_attention(state)
+    return dismissed
+
+
 def enqueue_web_message(
     state: dict[str, Any],
     mailer: Mailer | WebChannel,
@@ -18329,6 +18821,10 @@ def enqueue_web_message(
     normalize_developer_message_queue(state)
     message_id = str(message.get("message_id") or "").strip()
     if not message_id:
+        return False
+    if is_owner_trial_jump_text(str(message.get("body") or "")):
+        mailer.ack(state, message)
+        event(state, "owner_trial_jump_ignored", message_id=message_id)
         return False
     existing = queued_user_message(state, message_id)
     if existing is not None:
@@ -18931,6 +19427,8 @@ def process_next_developer_message(
     """
 
     normalize_developer_message_queue(state)
+    if dismiss_owner_trial_jump_queue(state):
+        save_state(state)
     item = next(
         (
             row
@@ -19320,10 +19818,13 @@ def planning_instruction(locale: str) -> str:
         "范围明确要求，否则不得加入统计、连续打卡、社交等功能探索。画像公开字段必须使用可直接展示"
         "的字符串或字符串数组（interest_profile 除外），task_script 每项只含 action，写用户能看懂"
         "的具体动作。tasks 必须是可执行 DAG，每项含 id,title,depends_on,guardrails,status=pending,"
-        "verification_mode。能由本地代码、自动化测试或 Experience Twin 验收的任务使用 candidate；"
+        "verification_mode。任务标题只写受试者能在界面上试到的功能点，禁止写入内部执行上下文"
+        "（P0/P1/P2/P3、端口、manifest-only、凭据、Experience Twin、CUJ 编号或英文变量名）。"
+        "能由本地代码、自动化测试或 Experience Twin 验收的任务使用 candidate；"
         "必须依赖外部服务器、应用商店、真实设备或第三方环境才能最终确认的任务使用 "
         "external_non_blocking，它们完成本地准备后进入等待外部验证且不得阻塞内测。不得创建邮件通知"
-        "体验者的任务，研发更新统一发布到 AppLooper 内测页。"
+        "体验者的任务，研发更新统一发布到 AppLooper 内测页。所有面向参与者展示的生成文本，包括 "
+        "summary、细分、画像字段、task_script 动作和任务标题，必须尽量使用中文。"
     )
 
 
@@ -19487,7 +19988,7 @@ def phase_plan(state: dict[str, Any], mailer: Mailer) -> None:
             "the shared CUJ as a persona_issue. All participant-facing generated text must be "
             "English. passed may be true only when every missing/issue array is empty. Do not edit code."
             if ui_locale == app_i18n.EN else
-            "独立审计显式护栏、画像覆盖和画像任务范围，不沿用规划者的自我声明。先逐句核对 intent 和现有 active guardrails，所有仍有效的用户显式需求都必须被 proposed_plan.guardrails 或 active_guardrails 原子覆盖，否则写入 missing_explicit_requirements。再根据用户明确描述的群体推导必要细分，检查年龄、地域、身份阶段、技术熟练度、设备、动机、限制、场景、习惯爱好和完整任务脚本。任何不能直接验证显式或冻结需求、或共享 CUJ 的画像动作都必须写入 persona_issues。只有所有 missing/issue 数组为空时 passed=true。不要修改代码。"
+            "独立审计显式护栏、画像覆盖和画像任务范围，不沿用规划者的自我声明。先逐句核对 intent 和现有 active guardrails，所有仍有效的用户显式需求都必须被 proposed_plan.guardrails 或 active_guardrails 原子覆盖，否则写入 missing_explicit_requirements。再根据用户明确描述的群体推导必要细分，检查年龄、地域、身份阶段、技术熟练度、设备、动机、限制、场景、习惯爱好和完整任务脚本。任何不能直接验证显式或冻结需求、或共享 CUJ 的画像动作都必须写入 persona_issues。所有面向参与者展示的生成文本必须尽量使用中文。只有所有 missing/issue 数组为空时 passed=true。不要修改代码。"
         ),
         "intent": state["intent"],
         "active_guardrails": active_guardrails(state),
@@ -20017,6 +20518,26 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
             state["triaged_feedback_id"] = feedback_fingerprint(state)
             save_state(state)
             if not feedback:
+                if study_multi_agent_treatment_enabled(state) and isinstance(
+                    state.get("pending_treatment_loop"), dict
+                ):
+                    try:
+                        close_treatment_loop(state, mailer, [], [])
+                    except Exception as exc:
+                        event(
+                            state,
+                            "developer_feedback_update_failed",
+                            error=f"{type(exc).__name__}: {exc}"[:500],
+                        )
+                    if treatment_loop_count(state) < developmental_experience_round_limit(state):
+                        if schedule_developmental_experience(
+                            state,
+                            mailer,
+                            trigger="developer_round",
+                            current_task=next_development_task(state, []),
+                        ):
+                            save_state(state)
+                            return
                 state["phase"] = "DELIVER"
                 set_public_phase_summary(
                     state,
@@ -20026,7 +20547,10 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
                 return
     if service_priority_web_messages(state, mailer, boundary="feedback_triage_complete"):
         return
-    cycle_rounds = int(state["round"]) - int(state.get("cycle_started_round", 0))
+    if study_multi_agent_treatment_enabled(state):
+        cycle_rounds = treatment_loop_count(state)
+    else:
+        cycle_rounds = int(state["round"]) - int(state.get("cycle_started_round", 0))
     if cycle_rounds >= int(state["max_rounds"]):
         if state.get("strict_round_limit"):
             state["strict_round_limit_reached"] = True
@@ -20166,7 +20690,8 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
         )
     else:
         state.pop("last_experience_twin_warning", None)
-    state["round"] = next_round
+    if not study_multi_agent_treatment_enabled(state):
+        state["round"] = next_round
     state["last_developer"] = result
     if prepared_twin is not None:
         state["experience_twin"] = prepared_twin
@@ -20247,45 +20772,6 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
         task_is_implemented(item)
         for item in tasks_by_id.values()
     )
-    # Spend remaining VU budget even after all tasks are implemented, so
-    # polish / release-fail loops still get tester+persona feedback before REVIEW.
-    developmental_scheduled = schedule_developmental_experience(
-        state,
-        mailer,
-        trigger="developer_round",
-        current_task=current_task,
-    )
-    if not developmental_scheduled:
-        state["phase"] = "REVIEW" if result.get("ready_for_review") and all_tasks_done else "DEVELOP"
-    if state["phase"] == "REVIEW":
-        candidate_id = candidate_fingerprint(state)
-        advance_candidate_readiness(
-            state,
-            "dev_ready",
-            candidate_id=candidate_id,
-            reason="developer_ready_all_tasks_implemented",
-        )
-        set_public_work_summary(
-            state,
-            kind="reviewing",
-            current=f"已完成：{task_title}",
-            next_step="开始独立验收并运行回归测试",
-        )
-    elif not developmental_scheduled:
-        set_public_work_summary(
-            state,
-            kind="developing",
-            current=f"已完成：{task_title}",
-            next_step="优先读取你的新消息，然后开始下一项研发任务",
-        )
-    try:
-        send_developer_feedback_updates(state, mailer, feedback_for_updates, list(result.get("changes") or []), shots)
-    except Exception as exc:
-        event(state, "developer_feedback_update_failed", error=f"{type(exc).__name__}: {exc}"[:500])
-    # Every completed coding loop posts one new vernacular bubble. `milestone`
-    # is a developer-model judgement and may be false even though a complete
-    # loop changed files; hiding those rounds makes participants guess whether
-    # work is moving. The detailed checklist stays in the progress panel.
     updates: list[str] = []
     for item in result.get("changes") or []:
         readable = _humanize_progress_line(public_mail_text(item, ""))
@@ -20310,6 +20796,78 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
             list(result.get("changes") or []),
         ),
     )
+    treatment = study_multi_agent_treatment_enabled(state)
+    closed_loop = False
+    if treatment and isinstance(state.get("pending_treatment_loop"), dict):
+        try:
+            closed_loop = close_treatment_loop(
+                state, mailer, list(result.get("changes") or []), shots
+            )
+        except Exception as exc:
+            event(state, "developer_feedback_update_failed", error=f"{type(exc).__name__}: {exc}"[:500])
+    loop_limit = developmental_experience_round_limit(state)
+    if treatment and treatment_loop_count(state) >= loop_limit:
+        developmental_scheduled = False
+        if state.get("strict_round_limit"):
+            state["strict_round_limit_reached"] = True
+            state["strict_round_limit_reached_at"] = utcnow()
+            event(
+                state,
+                "strict_round_limit_reached",
+                round=treatment_loop_count(state),
+                limit=loop_limit,
+            )
+            finalize_strict_round_limit_as_reviewable_prototype(state)
+        state["phase"] = "REVIEW" if result.get("ready_for_review") or all_tasks_done else "DELIVER"
+    else:
+        developmental_scheduled = schedule_developmental_experience(
+            state,
+            mailer,
+            trigger="developer_round",
+            current_task=current_task,
+        )
+        if not developmental_scheduled:
+            if treatment:
+                state["phase"] = (
+                    "REVIEW" if result.get("ready_for_review") and all_tasks_done else "DELIVER"
+                )
+            else:
+                state["phase"] = (
+                    "REVIEW" if result.get("ready_for_review") and all_tasks_done else "DEVELOP"
+                )
+    if state["phase"] == "REVIEW":
+        candidate_id = candidate_fingerprint(state)
+        advance_candidate_readiness(
+            state,
+            "dev_ready",
+            candidate_id=candidate_id,
+            reason="developer_ready_all_tasks_implemented",
+        )
+        set_public_work_summary(
+            state,
+            kind="reviewing",
+            current=f"已完成：{task_title}",
+            next_step="开始独立验收并运行回归测试",
+        )
+    elif not developmental_scheduled:
+        set_public_work_summary(
+            state,
+            kind="developing" if not treatment else "delivered",
+            current=f"已完成：{task_title}",
+            next_step=(
+                "优先读取你的新消息，然后开始下一项研发任务"
+                if not treatment
+                else "已完成本轮反馈闭环，不再空转内部开发轮"
+            ),
+        )
+    leftover_pending = isinstance(state.get("pending_treatment_loop"), dict)
+    if not closed_loop and (not treatment or leftover_pending):
+        try:
+            send_developer_feedback_updates(
+                state, mailer, feedback_for_updates, list(result.get("changes") or []), shots
+            )
+        except Exception as exc:
+            event(state, "developer_feedback_update_failed", error=f"{type(exc).__name__}: {exc}"[:500])
     if developmental_scheduled:
         event(
             state,
@@ -20317,7 +20875,12 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
             candidate_id=str((state.get("developmental_experience") or {}).get("candidate_id") or ""),
             task_id=str(current_task.get("id") or ""),
         )
-    maybe_flush_progress_digest(state, mailer)
+    if not treatment:
+        maybe_flush_progress_digest(state, mailer)
+    if finalize_stagnant_verify_as_reviewable_prototype(state):
+        event(state, "development_round", round=state["round"], ready=bool(result.get("ready_for_review")))
+        save_state(state)
+        return
     event(state, "development_round", round=state["round"], ready=bool(result.get("ready_for_review")))
     save_state(state)
 
@@ -20342,6 +20905,28 @@ def candidate_fingerprint(state: dict[str, Any]) -> str:
         if re.fullmatch(r"(?:screenshot|screen[-_]?capture)[-_.].*\.(?:png|jpe?g|webp)", name):
             return True
         return bool(re.fullmatch(r"(?:habit|state|snapshot)[-_.].*(?:checked|cleared).*\.html?", name))
+
+    def is_runtime_app_state(path: Path) -> bool:
+        """Ignore mutable stores written while using the running candidate.
+
+        Developmental testers and virtual users exercise the live app. Those
+        sessions persist contacts, reminders, or sqlite rows under a
+        conventional top-level data/ directory, or a workspace-root *.db.
+        That is runtime state, not product source, and must not mint a new
+        candidate id or republish the same delivery.
+        """
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            return False
+        parts = rel.parts
+        if parts and parts[0].casefold() == "data":
+            return True
+        name = path.name.casefold()
+        return bool(
+            len(parts) == 1
+            and re.fullmatch(r".+\.(?:sqlite(?:-wal|-shm)?|db(?:-wal|-shm)?)", name)
+        )
     cache_parts = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".coverage", "coverage"}
     generated_parts = {
         "dist",
@@ -20383,7 +20968,7 @@ def candidate_fingerprint(state: dict[str, Any]) -> str:
                 path = root / os.fsdecode(raw)
                 if excluded_parts.intersection(path.relative_to(root).parts):
                     continue
-                if is_runtime_evidence(path):
+                if is_runtime_evidence(path) or is_runtime_app_state(path):
                     continue
                 if path.is_file():
                     h.update(raw)
@@ -20398,6 +20983,7 @@ def candidate_fingerprint(state: dict[str, Any]) -> str:
             if p.is_file()
             and not excluded_parts.intersection(p.relative_to(root).parts)
             and not is_runtime_evidence(p)
+            and not is_runtime_app_state(p)
         ),
         key=lambda p: str(p),
     ):
@@ -21057,43 +21643,112 @@ def validate_release_review_coverage(
         )
 
 
+def experience_wave_cohort_key(
+    state: dict[str, Any],
+    candidate: str,
+    guardrails_id: str,
+) -> str:
+    """Keep one pair for the current wave; pick a new pair on the next loop."""
+
+    if study_multi_agent_treatment_enabled(state):
+        return f"{candidate}:{guardrails_id}:{treatment_loop_count(state)}"
+    return f"{candidate}:{guardrails_id}"
+
+
+def select_experience_wave_personas(
+    personas: list[dict[str, Any]],
+    *,
+    count: int,
+    previous_ids: set[str] | None = None,
+    rng: random.Random | None = None,
+) -> list[dict[str, Any]]:
+    """Choose a fresh pair from the named pool, preferring phone plus computer."""
+
+    rng = rng or random.SystemRandom()
+    pool = [row for row in personas if isinstance(row, dict) and row.get("id")]
+    if count <= 0 or not pool:
+        return []
+    count = min(count, len(pool))
+    previous_ids = {str(item) for item in (previous_ids or set())}
+    fresh = [row for row in pool if str(row.get("id") or "") not in previous_ids]
+    source = fresh if len(fresh) >= count else pool
+    desktop = [row for row in source if str(row.get("trial_surface") or "") == "desktop_web"]
+    mobile = [row for row in source if str(row.get("trial_surface") or "") == "mobile_web"]
+    if count >= 2 and desktop and mobile:
+        first = rng.choice(desktop)
+        second_choices = [row for row in mobile if row is not first] or mobile
+        chosen = [first, rng.choice(second_choices)]
+        remain = [row for row in source if row not in chosen]
+        while len(chosen) < count and remain:
+            pick = rng.choice(remain)
+            chosen.append(pick)
+            remain = [row for row in remain if row is not pick]
+        return chosen
+    return rng.sample(source, count)
+
+
 def prepare_internal_test_cohort(
     state: dict[str, Any],
     candidate: str,
     guardrails_id: str,
+    *,
+    rng: random.Random | None = None,
 ) -> list[dict[str, Any]]:
-    personas = [row for row in state.get("personas") or [] if isinstance(row, dict) and row.get("id")]
+    personas = assign_persona_trial_surfaces(
+        [row for row in state.get("personas") or [] if isinstance(row, dict) and row.get("id")]
+    )
+    if personas:
+        state["personas"] = personas
     if not personas:
         return []
-    key = f"{candidate}:{guardrails_id}"
+    treatment = study_multi_agent_treatment_enabled(state)
+    key = experience_wave_cohort_key(state, candidate, guardrails_id)
     existing = state.get("internal_test_cohort")
+    wave_size = min(
+        treatment_experience_wave_size(state) if treatment else INTERNAL_TEST_COHORT_SIZE,
+        len(personas),
+    )
     if isinstance(existing, dict) and existing.get("key") == key:
         selected_ids = {str(item) for item in existing.get("persona_ids") or []}
-        return [persona for persona in personas if str(persona.get("id")) in selected_ids]
+        selected = [persona for persona in personas if str(persona.get("id")) in selected_ids]
+        if selected and (not treatment or len(selected) <= wave_size):
+            return selected
 
-    count = (
-        min(TREATMENT_INTERNAL_TEST_COHORT_SIZE, len(personas))
-        if study_multi_agent_treatment_enabled(state)
-        else min(INTERNAL_TEST_COHORT_SIZE, len(personas))
-    )
     by_id = {str(persona.get("id")): persona for persona in personas}
     selected: list[dict[str, Any]] = []
     for persona_id in state.pop("next_internal_test_priority_personas", []) or []:
         persona = by_id.get(str(persona_id))
         if persona is not None and persona not in selected:
             selected.append(persona)
-    # Finding-to-fix replay must include every reporter in the coherent
-    # cluster. The normal rotating cohort remains bounded when there is no
-    # targeted replay; a multi-reporter receipt may temporarily expand it.
-    target_count = max(count, len(selected))
-    cursor = int(state.get("internal_test_cohort_cursor") or 0) % len(personas)
-    for offset in range(len(personas)):
-        if len(selected) >= target_count:
+        if treatment and len(selected) >= wave_size:
             break
-        persona = personas[(cursor + offset) % len(personas)]
-        if persona not in selected:
-            selected.append(persona)
-    state["internal_test_cohort_cursor"] = (cursor + target_count) % len(personas)
+    # Finding-to-fix replay may expand the baseline cohort. Treatment draws a
+    # new random pair each loop so the named pool actually rotates.
+    target_count = wave_size if treatment else max(wave_size, len(selected))
+    if treatment:
+        previous_ids = {
+            str(item)
+            for item in ((state.get("last_internal_test_cohort") or {}).get("persona_ids") or [])
+        }
+        needed = max(0, target_count - len(selected))
+        if needed:
+            selected.extend(
+                select_experience_wave_personas(
+                    [row for row in personas if row not in selected],
+                    count=needed,
+                    previous_ids=previous_ids,
+                    rng=rng,
+                )
+            )
+    else:
+        cursor = int(state.get("internal_test_cohort_cursor") or 0) % len(personas)
+        for offset in range(len(personas)):
+            if len(selected) >= target_count:
+                break
+            persona = personas[(cursor + offset) % len(personas)]
+            if persona not in selected:
+                selected.append(persona)
+        state["internal_test_cohort_cursor"] = (cursor + target_count) % len(personas)
     state["internal_test_cohort"] = {
         "key": key,
         "candidate_id": candidate,
@@ -21140,7 +21795,10 @@ def publish_internal_test_update(
         if isinstance(task, dict) and task_verification_mode(task) == "external_non_blocking"
     ]
     prior_handoffs = state.get("agent_feedback_handoffs")
-    first_delivery = not isinstance(prior_handoffs, dict) or not prior_handoffs
+    closed_loops = treatment_loop_count(state)
+    first_delivery = closed_loops <= 0 and (
+        not isinstance(prior_handoffs, dict) or not prior_handoffs
+    )
     body_lines = ["研发智能体已交付可运行版本，并通过代码与回归验收。"]
     if changes:
         body_lines += ["", "本轮更新：", *(f"- {item}" for item in changes)]
@@ -21153,7 +21811,7 @@ def publish_internal_test_update(
         (
             "初版已交付，可以开始试用"
             if first_delivery
-            else f"第 {max(1, int(state.get('round') or 0))} 轮更新已交付，可以开始试用"
+            else f"第 {max(1, closed_loops)} 轮更新已交付，可以开始试用"
         ),
         "\n".join(body_lines),
         key=f"internal-test-update:{candidate}:{guardrails_id}",
@@ -21194,6 +21852,22 @@ def agent_feedback_handoff_ready(
     )
 
 
+def treatment_delivery_cycle_open(state: dict[str, Any]) -> bool:
+    """True while a delivered version still owes tester + virtual-user feedback.
+
+    The next "第 N 轮更新已交付" announcement must wait until the current
+    cycle's test agent and every virtual user have published visible
+    feedback, and the developer has closed that pending loop.
+    """
+
+    if not study_multi_agent_treatment_enabled(state):
+        return False
+    if isinstance(state.get("pending_treatment_loop"), dict):
+        return True
+    active = state.get("developmental_experience")
+    return bool(isinstance(active, dict) and str(active.get("candidate_id") or "").strip())
+
+
 def schedule_developmental_experience(
     state: dict[str, Any],
     mailer: Mailer | WebChannel | None,
@@ -21210,7 +21884,46 @@ def schedule_developmental_experience(
 
     if not study_multi_agent_treatment_enabled(state):
         return False
-    limit = developmental_experience_round_limit()
+    if treatment_delivery_cycle_open(state):
+        active = state.get("developmental_experience")
+        if isinstance(active, dict) and str(active.get("candidate_id") or "").strip():
+            if mailer is not None and not agent_feedback_handoff_ready(
+                state,
+                str(active.get("candidate_id") or ""),
+                str(active.get("guardrail_set_id") or ""),
+            ):
+                cohort = prepare_internal_test_cohort(
+                    state,
+                    str(active.get("candidate_id") or ""),
+                    str(active.get("guardrail_set_id") or guardrail_fingerprint(state)),
+                )
+                try:
+                    handoff_message_id = publish_internal_test_update(
+                        state,
+                        mailer,
+                        str(active.get("candidate_id") or ""),
+                        str(active.get("guardrail_set_id") or guardrail_fingerprint(state)),
+                        cohort,
+                    )
+                    remember_agent_feedback_handoff(
+                        state,
+                        str(active.get("candidate_id") or ""),
+                        str(active.get("guardrail_set_id") or guardrail_fingerprint(state)),
+                        handoff_message_id,
+                    )
+                except Exception as exc:
+                    event(
+                        state,
+                        "developer_handoff_publish_failed",
+                        candidate_id=str(active.get("candidate_id") or ""),
+                        error=f"{type(exc).__name__}: {exc}"[:500],
+                    )
+                    return False
+            state["phase"] = "EXPERIENCE"
+            state["experience_mode"] = "developmental"
+            return True
+        return False
+    limit = developmental_experience_round_limit(state)
     completed = [str(item) for item in state.get("developmental_experience_candidates") or []]
     try:
         completed_rounds = max(0, int(state.get("developmental_experience_rounds") or 0))
@@ -21374,7 +22087,6 @@ def treatment_experience_tester_slot(
             "candidate_id": candidate,
             "guardrail_set_id": guardrails,
             "tester_attempted": False,
-            "tester_bubble_published": False,
             "tester_result": None,
             "tester_error": "",
         }
@@ -22600,20 +23312,106 @@ def _is_user_facing_experience_action(action: str) -> bool:
     return True
 
 
+def _text_matches_ui_locale(text: str, locale: str) -> bool:
+    english = app_i18n.normalize_locale(locale) == app_i18n.EN
+    has_cjk = app_i18n.contains_cjk(text)
+    return (not has_cjk) if english else has_cjk
+
+
+def _prefer_ui_locale_text(candidates: list[Any], locale: str) -> str:
+    usable = [str(raw).strip() for raw in candidates if str(raw or "").strip()]
+    if not usable:
+        return ""
+    matching = [text for text in usable if _text_matches_ui_locale(text, locale)]
+    return matching[0] if matching else usable[0]
+
+
 def _user_facing_experience_action(
     task: dict[str, Any],
     public_steps: dict[str, str],
+    locale: str = app_i18n.ZH,
 ) -> str:
     candidates = [
         public_steps.get(str(task.get("step_id") or "")),
         public_field(task.get("action") or task.get("task") or task.get("title") or task.get("description")),
         public_observation_field(task.get("evidence")),
     ]
-    for raw in candidates:
-        action = str(raw or "").strip()
-        if _is_user_facing_experience_action(action):
-            return action[:80]
-    return ""
+    usable = [
+        str(raw).strip()[:80]
+        for raw in candidates
+        if _is_user_facing_experience_action(str(raw or "").strip())
+    ]
+    return _scene_experience_action(
+        _prefer_ui_locale_text(usable, locale),
+        locale,
+        step_id=str(task.get("step_id") or ""),
+    )
+
+
+def _scene_experience_action(action: str, locale: str, *, step_id: str = "") -> str:
+    """Rewrite internal CUJ/test wording into a first-person user goal."""
+
+    text = str(action or "").strip()
+    if not text:
+        return ""
+    english = app_i18n.normalize_locale(locale) == app_i18n.EN
+    looks_auth = (
+        step_id in _INJECTED_AUTH_CUJ_STEP_IDS
+        or SYNTHETIC_PHONE in text
+        or SYNTHETIC_EMAIL in text
+        or "合成手机" in text
+        or "合成测试" in text
+        or "test_account" in text.casefold()
+    )
+    if looks_auth:
+        return (
+            "sign up and log in with my own phone number"
+            if english
+            else "用自己的手机号注册并登录"
+        )
+    cleaned = re.sub(
+        rf"{re.escape(SYNTHETIC_PHONE)}|{re.escape(SYNTHETIC_EMAIL)}|{re.escape(SYNTHETIC_OTP)}|合成[^，。]{{0,16}}|test_account|固定测试码",
+        "",
+        text,
+        flags=re.I,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ，。;；")
+    return cleaned or text
+
+
+def _persona_scene_opener(persona: dict[str, Any], locale: str, *, replay: bool) -> str:
+    english = app_i18n.normalize_locale(locale) == app_i18n.EN
+    device = public_field(persona.get("device"))
+    motivation = public_field(persona.get("motivation"))
+    scenario = public_field(persona.get("scenario"))
+    surface = str(persona.get("trial_surface") or "")
+    on_phone = bool(_MOBILE_DEVICE_RE.search(device)) or surface == "mobile_web"
+    on_computer = bool(_PERSONA_DESKTOP_DEVICE_RE.search(device)) or surface == "desktop_web"
+    if english:
+        if replay:
+            opener = "I came back to try the app again the way I normally would."
+        elif on_phone:
+            opener = "I'm using this on my phone."
+        elif on_computer:
+            opener = "I'm using this on a computer."
+        else:
+            opener = "I opened the app the way I normally would."
+        want = motivation or scenario
+        if want:
+            return f"{opener} I wanted to {want.rstrip('.')}."
+        return opener
+    if replay:
+        opener = "我又按自己平时的习惯回来试了一次。"
+    elif on_phone:
+        opener = "我用的是手机。"
+    elif on_computer:
+        opener = "我是在电脑上用的。"
+    else:
+        opener = "我按平时习惯打开了这个应用。"
+    want = motivation or scenario
+    if want:
+        return f"{opener}我想{want.rstrip('。')}。"
+    return opener
 
 
 def experience_copy_body(
@@ -22626,11 +23424,7 @@ def experience_copy_body(
     """Create a concise consumer-facing report from a named virtual user."""
 
     english = app_i18n.normalize_locale(locale) == app_i18n.EN
-    lines = [
-        ("This was my scheduled follow-up trial." if replay else "I have just finished trying the current app.")
-        if english
-        else ("这是我的定期回访复测。" if replay else "我刚刚试用了当前应用。"),
-    ]
+    lines = [_persona_scene_opener(persona, locale, replay=replay)]
     public_steps = {
         str(step.get("id")): public_field(step.get("action") or step.get("task") or step.get("description"))
         for step in persona.get("task_script") or []
@@ -22640,23 +23434,24 @@ def experience_copy_body(
     for task in result.get("task_results") or []:
         if not isinstance(task, dict):
             continue
-        action = _user_facing_experience_action(task, public_steps)
+        action = _user_facing_experience_action(task, public_steps, locale)
         if not action:
             continue
         passed = str(task.get("status", "")).upper() == "PASS"
-        task_lines.append(
-            f"- {'I managed to' if passed else 'I could not'}: {action}"
-            if english
-            else f"- {'做到了' if passed else '没做成'}：{action}"
-        )
+        if english:
+            task_lines.append(
+                f"I wanted to {action.rstrip('.')}, and I managed it."
+                if passed
+                else f"When I tried to {action.rstrip('.')}, I could not finish it."
+            )
+        else:
+            task_lines.append(
+                f"刚才我想{action.rstrip('。')}，做成了。"
+                if passed
+                else f"当我想{action.rstrip('。')}的时候，没做成。"
+            )
     if task_lines:
-        lines += ["", "What I tried:" if english else "我实际试了这些：", *task_lines[:2]]
-    else:
-        lines += [
-            "",
-            "I tried the app the way I normally would."
-            if english else "我按平时的使用习惯试用了应用。",
-        ]
+        lines.extend(task_lines[:2])
     issue_lines = []
     for issue in result.get("issues") or []:
         if not isinstance(issue, dict):
@@ -22664,33 +23459,36 @@ def experience_copy_body(
         title = public_observation_field(issue.get("title"))
         actual = public_observation_field(issue.get("actual"))
         description = public_observation_field(issue.get("description"))
-        summary = actual or description or title
+        summary = _prefer_ui_locale_text([actual, description, title], locale)
         if not summary:
             continue
-        issue_lines.append(f"- {summary[:48]}")
+        if english:
+            issue_lines.append(f"That's when I noticed {summary[:72].rstrip('.')}.")
+        else:
+            issue_lines.append(f"当时发现{summary[:72].rstrip('。')}。")
     # blocker/evidence are internal agent artefacts and may narrate tool use or
     # reasoning. Public mail only exposes a deterministic outcome here.
     blocker = (
         "I could not finish the hands-on trial this time."
-        if english else "本次没有顺利完成界面操作。"
+        if english else "这次界面我没能顺利操作完。"
     ) if result.get("blocker") or result.get("computer_use_succeeded") is not True else ""
     if issue_lines or blocker:
-        lines += ["", "What I found:" if english else "我发现的问题：", *issue_lines[:2]]
+        lines.extend(issue_lines[:2])
         if blocker:
-            lines.append(f"- {blocker}")
-        lines += [
-            "",
+            lines.append(blocker)
+        lines.append(
             "@Developer agent Please use this trial result in the next update."
-            if english else "@研发智能体 请在下一轮更新中处理这次体验发现的问题。",
-        ]
+            if english else "@研发智能体 请在下一轮更新中处理这次体验发现的问题。"
+        )
     else:
-        lines += [
-            "",
+        lines.append(
             ("The earlier issue did not appear again in this follow-up." if replay else "I did not find an obvious problem in this trial.")
-            if english else ("之前的问题在本次复测中没有再次出现。" if replay else "这次没有遇到明显的问题。"),
+            if english else ("之前的问题在这次再试时没有再出现。" if replay else "这次没有遇到明显的问题。")
+        )
+        lines.append(
             "@Developer agent This version can continue to the next check."
-            if english else "@研发智能体 当前版本可以继续进入下一项检查。",
-        ]
+            if english else "@研发智能体 当前版本可以继续进入下一项检查。"
+        )
     return public_mail_text(
         "\n".join(lines),
         "The trial result was sent to the developer agent."
@@ -22896,6 +23694,8 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
                 next_step="交付可运行版本后再启动测试智能体和虚拟用户",
             )
             return
+        # Keep the announced cycle even if the workspace hash drifts.
+        # Aborting here republished "第 1 轮更新已交付" and skipped testers.
     else:
         validated = (state.get("validation") or {}).get("candidate_id")
         validated_guardrails = (state.get("validation") or {}).get("guardrail_set_id")
@@ -23194,7 +23994,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         ui_locale = prompt_ui_locale(state)
         payload = {
             "task": public_bubble_language_instruction(ui_locale)
-            + "严格按画像通过 UI 完成 task_script。"
+            + "严格按画像通过 UI 完成 task_script。你就是这个人：用这个人的设备、动机和场景去用应用，不要像测试员报步骤。"
             + (
                 "本轮只复测上轮你本人提到的问题，不要再做完整巡检。"
                 if any(
@@ -23202,10 +24002,10 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
                     for row in previous
                     if isinstance(row, dict) and row.get("persona_id") == persona_row["id"]
                 )
-                else "按平时使用习惯试用核心功能。"
+                else "按这个人平时会做的事试用核心功能。"
             )
-            + "你是真实用户，只谈自己能不能完成这件事、哪里不顺手；禁止写 localStorage、认证体系、账号系统、产品成熟度、架构或同步方案。"
-            + "issues 的 title/description/actual/expected 各不超过 40 字，用生活化短句。"
+            + "你是真实用户，只谈自己能不能办成这件事、卡在哪、点了什么却做不了；禁止写 localStorage、认证体系、账号系统、产品成熟度、架构或同步方案。"
+            + "公开字段用第一人称场景化短句，例如「当我填身高的时候，下一步点不了」。issues 的 title/description/actual/expected 各不超过 40 字。"
             + experience_auth_cuj_prompt(state)
             + "有 experience_twin 时必须只用 Chrome Computer Use（不可用时可用 Playwright 等真实浏览器自动化）打开这个统一 Web Preview，按 persona.trial_surface 选择对应 view：desktop_web 用电脑网页端（宽屏），mobile_web 用手机网页端（竖屏），并严格使用该 view.route 和 viewport.width/height；跨端任务在同一 shared_session 中切换多个 view。不得为 Android、iOS、鸿蒙或 Windows 编写专用体验分支。"
             + "必须留意当前设备上的呈现样式：若电脑端却是窄竖屏手机排版，或手机端却是宽屏电脑排版、按钮过小点不到，这就是问题，要写进 issues 交给研发改进，change_scope=usability_within_guardrail。"
@@ -23521,7 +24321,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
             )
             state["internal_test_queue"] = test_queue
             save_state(state)
-        latest_by_persona = {
+    latest_by_persona = {
         str(row.get("persona_id") or ""): row
         for row in previous
         if isinstance(row, dict) and str(row.get("persona_id") or "")
@@ -23683,9 +24483,18 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         if str(validated) not in completed:
             completed.append(str(validated))
         state["developmental_experience_candidates"] = completed[-20:]
-        state["developmental_experience_rounds"] = int(
-            state.get("developmental_experience_rounds") or 0
-        ) + 1
+        agent_ids = [TREATMENT_TEST_AGENT_ID]
+        for row in results:
+            persona_id = str((row or {}).get("persona_id") or "").strip()
+            if persona_id and persona_id not in agent_ids:
+                agent_ids.append(persona_id)
+        state["pending_treatment_loop"] = {
+            "candidate_id": validated,
+            "guardrail_set_id": validated_guardrails,
+            "agent_ids": agent_ids,
+            "feedback": [dict(row) for row in developmental_feedback if isinstance(row, dict)],
+            "started_at": utcnow(),
+        }
         history = [
             row
             for row in state.get("developmental_experience_history") or []
@@ -24090,7 +24899,7 @@ def phase_replay(state: dict[str, Any], mailer: Mailer) -> None:
             prompt_json(
                 "定期回访高频问题",
                 {
-                    "task": "严格扮演画像，只通过真实 UI 按 replay_script 定向复测这个历史高频问题。有 experience_twin 时只打开统一 Web Preview，使用与画像最匹配的 view.route 和 viewport；不得按原生系统分支。没有 experience_twin 时如实报告需回到 Claude Code/Codex 原生环境，不得用源码或 API 冒充体验。必须使用 Computer Use，并保存至少一张本轮 UI 截图到 artifact_dir。公开截图最多 2 张：问题证据 1 张和最终状态 1 张；等待、轮询、加载中不得反复截图，也不要提交重复画面。Web 截图必须 fullPage=false，关键信息很小时优先截取可见元素并保留必要上下文。task_results 与 replay_script 一一对应。只报告真实感受；问题已消失时明确 satisfied=true、issues=[]，不要继续探索无关功能。",
+                    "task": "严格扮演画像，只通过真实 UI 按 replay_script 定向复测这个历史高频问题。有 experience_twin 时只打开统一 Web Preview，按 persona.trial_surface 使用对应 view.route 和 viewport（desktop_web=电脑网页端宽屏，mobile_web=手机网页端竖屏）；若当前设备上的排版明显像另一端，必须作为问题交给研发。不得按原生系统分支。没有 experience_twin 时如实报告需回到 Claude Code/Codex 原生环境，不得用源码或 API 冒充体验。必须使用 Computer Use，并保存至少一张本轮 UI 截图到 artifact_dir。公开截图最多 2 张：问题证据 1 张和最终状态 1 张；等待、轮询、加载中不得反复截图，也不要提交重复画面。Web 截图必须 fullPage=false，关键信息很小时优先截取可见元素并保留必要上下文。task_results 与 replay_script 一一对应。只报告真实感受；问题已消失时明确 satisfied=true、issues=[]，不要继续探索无关功能。",
                     "candidate_id": candidate,
                     "guardrail_set_id": guardrails_id,
                     "batch_id": str(current.get("id") or ""),
@@ -24279,12 +25088,11 @@ def release_agent_satisfaction(
     unresolved_feedback: list[Any],
     p0_count: int,
 ) -> dict[str, Any]:
-    """Aggregate agent satisfaction used as the study release gate.
+    """Aggregate agent satisfaction used as the local release gate.
 
-    Claude Code Loop freezes when the developer agent judges the app suitable
-    for release. AppLooper additionally requires virtual users and the test
-    agent; the owner-intent agent votes only when the owner actually gave
-    feedback.
+    The developer agent can mark the app ready. The multi-agent workflow also
+    requires virtual users and the test agent; the owner-intent agent votes
+    only when the owner actually gave feedback.
     """
 
     multi = study_multi_agent_treatment_enabled(state)
@@ -26872,25 +27680,7 @@ def run_workflow(
                 try:
                     workflow_step_succeeded = False
                     mailer = mailer or (WebChannel(state) if state.get("channel") == "web" else Mailer(state))
-                    if not state.get("welcome_sent"):
-                        en_ui = prompt_ui_locale(state) == "en"
-                        mailer.send(
-                            state,
-                            "Development started" if en_ui else "研发已开始",
-                            (
-                                f"The developer agent has started building: {state['intent']}\n\n"
-                                "A trial version will appear as soon as it is ready. Test agents and representative users will then try it and send clear feedback here. You can add ideas at any time."
-                                if en_ui
-                                else (
-                                    f"研发智能体已经开始构建：{state['intent']}\n\n"
-                                    "可试用版本准备好后会直接出现在「试用」页。随后测试智能体和具有代表性的虚拟用户会实际试用，并把清晰的反馈发到这里。你也可以随时补充想法。"
-                                )
-                            ),
-                            key="welcome",
-                            actor="orchestrator",
-                        )
-                        state["welcome_sent"] = True
-                        save_state(state)
+                    ensure_developer_welcome(state, mailer)
                     if state.get("pending_notice"):
                         send_notice(state, mailer)
                     # A direct developer-chat turn may have edited a project
@@ -27028,19 +27818,8 @@ def run_workflow(
                 except FatalWorkflowError as exc:
                     hold = classify_safety_hold(exc, state)
                     state["internal_recovery_diagnostic"] = hold
-                    state.pop("safety_hold", None)
                     state.pop("recovery_required", None)
-                    _rotate_phase_sessions_for_recovery(state)
-                    delay = max(30, min(300, int(state.get("poll_seconds") or 30)))
-                    state["worker_retry_after"] = time.time() + delay
-                    state["status"] = "retrying_error"
                     state["last_error"] = hold["last_error"]
-                    set_public_work_summary(
-                        state,
-                        kind="recovering",
-                        current="正在核对最新版本，已有进度和消息均已保存",
-                        next_step="系统会自动继续处理，无需手动恢复",
-                    )
                     event(
                         state,
                         "safety_hold",
@@ -27049,17 +27828,42 @@ def run_workflow(
                         recoverable=bool(hold.get("recoverable")),
                         resume_action=hold["resume_action"],
                     )
-                    save_state(state)
-                    if once:
-                        break
-                    mailer = None
-                    wait_for_stop(
-                        stop,
-                        delay,
-                        run_id=run_id,
-                        worker_generation=control_generation,
+                    if hold.get("recoverable") is True:
+                        state.pop("safety_hold", None)
+                        _rotate_phase_sessions_for_recovery(state)
+                        delay = max(30, min(300, int(state.get("poll_seconds") or 30)))
+                        state["worker_retry_after"] = time.time() + delay
+                        state["status"] = "retrying_error"
+                        set_public_work_summary(
+                            state,
+                            kind="recovering",
+                            current="正在核对最新版本，已有进度和消息均已保存",
+                            next_step="系统会自动继续处理，无需手动恢复",
+                        )
+                        save_state(state)
+                        if once:
+                            break
+                        mailer = None
+                        wait_for_stop(
+                            stop,
+                            delay,
+                            run_id=run_id,
+                            worker_generation=control_generation,
+                        )
+                        continue
+                    # Unrecoverable integrity failures must not auto-retry.
+                    # Retrying here republished the same "round 1 delivered"
+                    # bubble every time a read-only tester wrote runtime data.
+                    state["safety_hold"] = hold
+                    state["status"] = "paused_safety"
+                    set_public_work_summary(
+                        state,
+                        kind="stopped",
+                        current="当前版本完整性检查未通过，已停止自动重试以免重复交付",
+                        next_step="不会自动复读本轮交付；修复只读越权后再继续内测循环",
                     )
-                    continue
+                    save_state(state)
+                    break
                 except Exception as exc:
                     error_text = f"{type(exc).__name__}: {exc}"
                     recovered_checkpoint = False

@@ -108,7 +108,7 @@ REMOTE_DISPLAY_MAX_ACTIVE_LAUNCHES = 8
 REMOTE_DISPLAY_INSTALL_VERSION = 1
 REMOTE_DISPLAY_INSTALL_TIMEOUT_SECONDS = 20 * 60
 ISOLATED_WEB_SURFACE_TYPES = {"desktop_web", "mobile_web", "tablet_web", "responsive", "web"}
-EXPERIENCE_VIEW_SURFACE_ALIASES = {
+COMMUNITY_VIEW_SURFACE_ALIASES = {
     "desktop": "desktop_web",
     "pc": "desktop_web",
     "computer": "desktop_web",
@@ -880,38 +880,42 @@ def _owner_trial_seed_from_query(query: str) -> dict[str, Any] | None:
         return None
     if not isinstance(payload, dict):
         return None
-    ensure_logs = max(0, min(5, int(payload.get("ensure_logs") or 0)))
-    focus_id = re.sub(r"[^A-Za-z0-9_-]", "", str(payload.get("focus_id") or ""))[:64]
-    storage_key = re.sub(
-        r"[^A-Za-z0-9_-]", "", str(payload.get("storage_key") or "hydration_app_v1")
-    )[:64] or "hydration_app_v1"
-    return {
-        "version": 1,
-        "ensure_logs": ensure_logs,
-        "focus_id": focus_id,
-        "storage_key": storage_key,
-    }
+    return WorkflowWebService._normalize_owner_trial_seed(payload)
 
 
 _OWNER_TRIAL_SEED_SCRIPT = """<script data-applooper-owner-seed>
 (()=>{"use strict";
 const seed=__APPLOOPER_OWNER_SEED__;
 try{
-  const key=String(seed.storage_key||"hydration_app_v1");
-  const need=Math.max(0,Math.min(5,Number(seed.ensure_logs||0)));
-  const pad=n=>String(n).padStart(2,"0");
-  // Match the water app's getTodayKey(): UTC ISO date slice.
-  const today=new Date().toISOString().slice(0,10);
-  let raw={};try{raw=JSON.parse(localStorage.getItem(key)||"{}")||{}}catch(_e){raw={}}
-  if(!raw.days||typeof raw.days!=="object")raw.days={};
-  let day=raw.days[today];if(!day||typeof day!=="object")day={count:0,logs:[],goal:8};
-  if(day.goal==null||!(Number(day.goal)>0))day.goal=8;
-  if(!Array.isArray(day.logs))day.logs=[];
-  while(day.logs.length<need){
-    const now=new Date();
-    day.logs.push({time:pad(now.getHours())+":"+pad(now.getMinutes()),ts:now.getTime()-day.logs.length*60000});
+  const key=String(seed.storage_key||"");
+  const listKey=String(seed.list_key||"");
+  const records=Array.isArray(seed.records)?seed.records:[];
+  const need=Math.max(0,Math.min(8,Number(seed.ensure_count||seed.ensure_logs||0)));
+  let raw={};try{raw=JSON.parse(localStorage.getItem(key||"hydration_app_v1")||"{}")||{}}catch(_e){raw={}}
+  if(records.length&&listKey){
+    if(!raw||typeof raw!=="object"||Array.isArray(raw))raw={};
+    if(!Array.isArray(raw[listKey]))raw[listKey]=[];
+    records.forEach(rec=>{
+      if(!rec||typeof rec!=="object")return;
+      const id=String(rec.id||"");
+      if(id&&raw[listKey].some(row=>row&&String(row.id||"")===id))return;
+      raw[listKey].push(rec);
+    });
+    if(listKey==="pets"&&!raw.selectedPetId&&raw.pets&&raw.pets[0])raw.selectedPetId=raw.pets[0].id;
+    if(key)localStorage.setItem(key,JSON.stringify(raw));
+  }else{
+    const pad=n=>String(n).padStart(2,"0");
+    const today=new Date().toISOString().slice(0,10);
+    if(!raw.days||typeof raw.days!=="object")raw.days={};
+    let day=raw.days[today];if(!day||typeof day!=="object")day={count:0,logs:[],goal:8};
+    if(day.goal==null||!(Number(day.goal)>0))day.goal=8;
+    if(!Array.isArray(day.logs))day.logs=[];
+    while(day.logs.length<need){
+      const now=new Date();
+      day.logs.push({time:pad(now.getHours())+":"+pad(now.getMinutes()),ts:now.getTime()-day.logs.length*60000});
+    }
+    if(need>0){day.count=Math.max(Number(day.count||0),day.logs.length);raw.days[today]=day;localStorage.setItem(key||"hydration_app_v1",JSON.stringify(raw));}
   }
-  if(need>0){day.count=Math.max(Number(day.count||0),day.logs.length);raw.days[today]=day;localStorage.setItem(key,JSON.stringify(raw));}
 }catch(_err){}
 const focus=()=>{
   const id=String(seed.focus_id||"");
@@ -5225,6 +5229,22 @@ class WorkflowWebService:
             selected = dict(raw)
             selected["_public_session_role"] = "operations"
             return "operations", "运营智能体", selected, "operations"
+
+        if requested.casefold() in {"internal_test", "development-test-agent", "development_tester"}:
+            raw = (
+                sessions.get("development_tester")
+                if isinstance(sessions.get("development_tester"), dict)
+                else {}
+            )
+            selected = dict(raw)
+            selected["_public_session_role"] = "development_tester"
+            return "development-test-agent", "测试智能体", selected, "internal_test"
+
+        if requested.casefold() in {"owner_intent", "owner-intent", "owner_proxy"}:
+            raw = sessions.get("owner_proxy") if isinstance(sessions.get("owner_proxy"), dict) else {}
+            selected = dict(raw)
+            selected["_public_session_role"] = "owner_proxy"
+            return "owner_intent", "需求验收智能体", selected, "owner_intent"
 
         if requested.startswith("sprep-"):
             surface_id = requested[5:]
@@ -10041,7 +10061,7 @@ class WorkflowWebService:
     @staticmethod
     def _requested_web_surface_kind(requested: str) -> str:
         wanted = str(requested or "").strip().casefold()
-        mapped = EXPERIENCE_VIEW_SURFACE_ALIASES.get(wanted, "")
+        mapped = COMMUNITY_VIEW_SURFACE_ALIASES.get(wanted, "")
         if mapped:
             return mapped
         if any(token in wanted for token in ("mobile", "phone", "h5")):
@@ -10078,6 +10098,12 @@ class WorkflowWebService:
         surfaces: list[dict[str, Any]],
         requested: Any,
     ) -> dict[str, Any] | None:
+        """Map wrap aliases such as mobile/mobile_web onto a real web surface.
+
+        Older published apps often expose only ``responsive`` or ``desktop_web``.
+        The wrap page still has a distinct 手机网页端 chip, so that request must
+        open a phone viewport instead of silently reusing the desktop window.
+        """
         rows = [item for item in surfaces if isinstance(item, dict)]
         if not rows:
             return None
@@ -11318,39 +11344,6 @@ class WorkflowWebService:
                 best_ts = timestamp
         return best
 
-    def _enqueue_warm_remote_displays(self, pending: list[tuple[str, str]]) -> None:
-        with self._remote_display_lock:
-            seen = set(self._remote_display_warm_pending)
-            for item in pending:
-                if item in seen:
-                    continue
-                self._remote_display_warm_pending.append(item)
-                seen.add(item)
-            thread = self._remote_display_warm_thread
-            if thread is None or not thread.is_alive():
-                self._remote_display_warm_thread = threading.Thread(
-                    target=self._warm_remote_display_queue_worker,
-                    daemon=True,
-                    name="warm-remote-display-queue",
-                )
-                self._remote_display_warm_thread.start()
-
-    def _warm_remote_display_queue_worker(self) -> None:
-        while True:
-            with self._remote_display_lock:
-                if not self._remote_display_warm_pending:
-                    self._remote_display_warm_thread = None
-                    return
-                run_id, surface_id = self._remote_display_warm_pending.pop(0)
-            try:
-                self.start_remote_display_service(run_id, surface_id)
-                with self._remote_display_lock:
-                    thread = self._remote_display_start_threads.get((run_id, surface_id))
-                if thread is not None and thread.is_alive():
-                    thread.join(timeout=120)
-            except (APIError, OSError, RuntimeError, ValueError):
-                continue
-
     def _remote_display_starting_public(
         self,
         run_id: str,
@@ -11383,7 +11376,7 @@ class WorkflowWebService:
         try:
             state = self.load_app_state(run_id)
             surface = self._remote_display_surface(state, surface_id)
-            self._ensure_browser_surface_runtime_with_preview_recovery(
+            target, _state, _surface = self._ensure_browser_surface_runtime_with_preview_recovery(
                 state,
                 surface,
                 trigger="display_service",
@@ -11392,6 +11385,7 @@ class WorkflowWebService:
                 self._remote_display_start_states[key] = {
                     "phase": "ready",
                     "error": None,
+                    "target": self._remote_target_record(target),
                     "finished_at": utcnow(),
                 }
         except (OSError, SurfaceRuntimeError, APIError) as exc:
@@ -11412,12 +11406,16 @@ class WorkflowWebService:
                     self._remote_display_start_threads.pop(key, None)
 
     def warm_remote_display_services(self) -> int:
-        """Rebuild isolated web displays after a tenant process start."""
+        """Rebuild isolated web displays after a tenant process start.
+
+        Queue one surface at a time. Launching every desktop/mobile stack at
+        once contends for the managed-preview lock and the first Chromium, so
+        a user retry then stacks a second cold start on the request thread.
+        """
 
         runs_root = workflow_agent.state_home() / "runs"
         if not runs_root.is_dir():
             return 0
-        started = 0
         pending: list[tuple[str, str]] = []
         for path in sorted(runs_root.iterdir()):
             run_id = path.name
@@ -11438,10 +11436,42 @@ class WorkflowWebService:
                 error_code = str((status.get("error") or {}).get("code") or "")
                 if phase == "can_start" or error_code == "preview_runtime_stale":
                     pending.append((run_id, str(surface["id"])))
-                    started += 1
         if pending:
             self._enqueue_warm_remote_displays(pending)
-        return started
+        return len(pending)
+
+    def _enqueue_warm_remote_displays(self, pending: list[tuple[str, str]]) -> None:
+        with self._remote_display_lock:
+            seen = set(self._remote_display_warm_pending)
+            for item in pending:
+                if item in seen:
+                    continue
+                self._remote_display_warm_pending.append(item)
+                seen.add(item)
+            thread = self._remote_display_warm_thread
+            if thread is None or not thread.is_alive():
+                self._remote_display_warm_thread = threading.Thread(
+                    target=self._warm_remote_display_queue_worker,
+                    daemon=True,
+                    name="warm-remote-display-queue",
+                )
+                self._remote_display_warm_thread.start()
+
+    def _warm_remote_display_queue_worker(self) -> None:
+        while True:
+            with self._remote_display_lock:
+                if not self._remote_display_warm_pending:
+                    self._remote_display_warm_thread = None
+                    return
+                run_id, surface_id = self._remote_display_warm_pending.pop(0)
+            try:
+                self.start_remote_display_service(run_id, surface_id)
+                with self._remote_display_lock:
+                    thread = self._remote_display_start_threads.get((run_id, surface_id))
+                if thread is not None and thread.is_alive():
+                    thread.join(timeout=120)
+            except (APIError, OSError, RuntimeError, ValueError):
+                continue
 
     def start_remote_display_service(
         self,
@@ -12285,6 +12315,9 @@ class WorkflowWebService:
             raise APIError(HTTPStatus.NOT_FOUND, "surface_not_found", "找不到该应用形态")
         isolated_web_surface = self._is_isolated_web_surface(surface)
         if isolated_web_surface:
+            # Join the display-service worker instead of waiting 25s+Chromium
+            # on this request. The 20s frontend POST must return while the
+            # isolated window is still starting.
             target = self._isolated_web_ready_target(run_id, str(surface["id"]))
             if target is None:
                 self.start_remote_display_service(run_id, str(surface["id"]))
@@ -14635,10 +14668,12 @@ class WorkflowWebService:
         r"登录|注册|搜索|通知|图表|列表|详情|设置|日历|报表|记账|预算|分类|"
         r"打卡|习惯|目标(?!用户)|水分|杯数|闹钟|"
         r"收支|台账|支出|收入|账单|流水|储蓄|结余|平衡表|"
+        r"宠物|游戏|益智|入口|养成|同步|"
         r"water|drink|reminder|progress|record|dashboard|entry|summary|"
         r"chart|list|filter|export|login|search|notification|calendar|"
         r"report|budget|habit|goal|alarm|"
-        r"ledger|income|expense|saving",
+        r"ledger|income|expense|saving|"
+        r"puzzle|pet|game",
         flags=re.I,
     )
     _OWNER_TITLE_INFRA_CHUNK_RE = re.compile(
@@ -14675,7 +14710,14 @@ class WorkflowWebService:
         r"用户画像覆盖|"
         r"runtime environment|"
         r"target user(?: persona)? coverage|"
-        r"persona coverage"
+        r"persona coverage|"
+        r"\bP[0-3]\b|"
+        r"含\s*P[0-3]|"
+        r"快速闭环|"
+        r"端口验证|"
+        r"无凭据|"
+        r"\bno[- ]credentials?\b|"
+        r"manifest[- ]?only(?:\s*AI)?"
         r")",
         flags=re.I,
     )
@@ -14694,7 +14736,8 @@ class WorkflowWebService:
         r"本地\s*Web\s*应用基础结构|web\s+app\s+scaffolding|"
         r"local\s+web\s+app\s+(?:foundation|infrastructure|scaffold)|"
         r"端口\s*\d+|运行环境|目标用户画像|用户画像覆盖|"
-        r"runtime environment|persona coverage",
+        r"runtime environment|persona coverage|"
+        r"\bP[0-3]\b|快速闭环|端口验证|无凭据|manifest[- ]?only",
         flags=re.I,
     )
     _OWNER_ATOMIC_FEATURE_MARKERS = (
@@ -14733,11 +14776,35 @@ class WorkflowWebService:
         seed: dict[str, Any] = {
             "version": 1,
             "ensure_logs": 0,
+            "ensure_count": 0,
+            "needs_prep": False,
             "focus_id": "",
             "storage_key": "hydration_app_v1",
+            "list_key": "",
+            "records": [],
         }
-        if re.search(r"删除|移除|清空|delete|remove|clear", text, flags=re.I):
-            seed.update({"ensure_logs": 1, "focus_id": "clearBtn"})
+        if re.search(
+            r"已经添加|已添加|已有多个|多个宠物|批量管理|already added|multiple pets",
+            text,
+            flags=re.I,
+        ) or (
+            re.search(r"宠物|pets?", text, flags=re.I)
+            and re.search(r"已经|已有|多个|批量|already|multiple|several|existing", text, flags=re.I)
+        ):
+            seed.update({
+                "needs_prep": True,
+                "ensure_logs": 3,
+                "ensure_count": 3,
+                "list_key": "pets",
+                "focus_id": "",
+            })
+            howto = (
+                "试用页已预置多条宠物记录。请直接在当前列表上做管理（查看、编辑或批量操作），确认列表不再是空状态。"
+                if not english
+                else "Several pet records are already prepared. Manage them on the current list and confirm it is no longer empty."
+            )
+        elif re.search(r"删除|移除|清空|delete|remove|clear", text, flags=re.I):
+            seed.update({"ensure_logs": 1, "ensure_count": 1, "needs_prep": True, "focus_id": "clearBtn"})
             howto = (
                 "页面已预置至少一条饮水记录。请找到删除/清空入口并删掉记录，确认列表和今日进度同步变少。"
                 if not english
@@ -14859,6 +14926,7 @@ class WorkflowWebService:
         expanded = re.sub(r"[（(]([^）)]{2,160})[）)]", r" \1 ", text)
         expanded = expanded.replace("+", "、")
         expanded = cls._OWNER_TITLE_INFRA_CHUNK_RE.sub(" ", expanded)
+        expanded = re.sub(r"(?:^|[\s、,;；])含\s+", " ", expanded)
         expanded = re.sub(r"(?:并)?绑定\s*$", "", expanded)
         expanded = re.sub(r"^(?:在本地|locally)\s*", "", expanded, flags=re.I)
         expanded = re.sub(
@@ -14902,6 +14970,16 @@ class WorkflowWebService:
             if cleaned not in kept:
                 kept.append(cleaned[:80])
         if kept:
+            chinese_kept = [item for item in kept if app_i18n.contains_cjk(item)]
+            if chinese_kept:
+                kept = [
+                    item for item in kept
+                    if app_i18n.contains_cjk(item)
+                    or not re.fullmatch(
+                        r"[A-Za-z][A-Za-z0-9]+(?:\s+[A-Za-z][A-Za-z0-9]+)*",
+                        item,
+                    )
+                ] or kept
             return (" and ".join(kept) if english else "、".join(kept))[:160]
         # Platform preview / verify-only scaffolding is not a product feature.
         if cls._OWNER_VERIFY_ONLY_TITLE_RE.match(text) or re.search(
@@ -15190,16 +15268,60 @@ class WorkflowWebService:
         }
 
     @classmethod
+    def _sanitize_trial_record(cls, value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        record: dict[str, Any] = {}
+        for raw_key, raw_value in list(value.items())[:12]:
+            key = re.sub(r"[^A-Za-z0-9_-]", "", str(raw_key or ""))[:32]
+            if not key or key.startswith("__"):
+                continue
+            if isinstance(raw_value, bool):
+                record[key] = raw_value
+            elif isinstance(raw_value, (int, float)) and not isinstance(raw_value, bool):
+                record[key] = raw_value
+            else:
+                text = re.sub(r"\s+", " ", str(raw_value or "")).strip()[:80]
+                if text:
+                    record[key] = text
+        if not record:
+            return None
+        if "id" not in record:
+            record["id"] = "trial-" + uuid.uuid4().hex[:8]
+        else:
+            record["id"] = re.sub(r"[^A-Za-z0-9_-]", "", str(record["id"]))[:48] or (
+                "trial-" + uuid.uuid4().hex[:8]
+            )
+        return record
+
+    @classmethod
     def _normalize_owner_trial_seed(cls, value: Any) -> dict[str, Any]:
         raw = value if isinstance(value, dict) else {}
-        ensure_logs = max(0, min(5, int(raw.get("ensure_logs") or 0)))
+        ensure_logs = max(0, min(8, int(raw.get("ensure_logs") or raw.get("ensure_count") or 0)))
         focus_id = re.sub(r"[^A-Za-z0-9_-]", "", str(raw.get("focus_id") or ""))[:64]
-        storage_key = re.sub(r"[^A-Za-z0-9_-]", "", str(raw.get("storage_key") or "hydration_app_v1"))[:64]
+        storage_key = re.sub(
+            r"[^A-Za-z0-9_-]", "", str(raw.get("storage_key") or "hydration_app_v1")
+        )[:64]
+        list_key = re.sub(r"[^A-Za-z0-9_-]", "", str(raw.get("list_key") or ""))[:32]
+        records = [
+            item
+            for item in (
+                cls._sanitize_trial_record(row)
+                for row in (raw.get("records") or [])[:8]
+            )
+            if item
+        ]
+        ensure_count = max(ensure_logs, len(records), max(0, min(8, int(raw.get("ensure_count") or 0))))
         return {
-            "version": 1,
-            "ensure_logs": ensure_logs,
+            "version": 2 if records or list_key else 1,
+            "needs_prep": bool(raw.get("needs_prep") or records or ensure_count > 0),
+            "ensure_logs": ensure_count,
+            "ensure_count": ensure_count,
             "focus_id": focus_id,
             "storage_key": storage_key or "hydration_app_v1",
+            "list_key": list_key,
+            "records": records,
+            "reload": True,
         }
 
     @classmethod
@@ -18266,6 +18388,34 @@ class WorkflowWebService:
                 "last_published_at": workflow_agent.lifecycle_safe_text(iteration.get("last_published_at"), "", limit=64),
                 "last_developer_reply_at": workflow_agent.lifecycle_safe_text(iteration.get("last_developer_reply_at"), "", limit=64),
             }
+        review = public.get("release_review")
+        if isinstance(review, dict):
+            study = str(review.get("study_condition") or "") in {
+                "claude_text", "claude_preview", "applooper_bound",
+            }
+            cleaned_items: list[dict[str, Any]] = []
+            for item in review.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                row = dict(item)
+                if study:
+                    row["context_provenance"] = []
+                title = str(row.get("title") or "").strip()
+                human = WorkflowWebService._owner_humanize_feature_title(
+                    title, english=not app_i18n.contains_cjk(title)
+                )
+                if human:
+                    row["title"] = human
+                    title_i18n = row.get("title_i18n") if isinstance(row.get("title_i18n"), dict) else {}
+                    zh = WorkflowWebService._owner_humanize_feature_title(
+                        str(title_i18n.get(app_i18n.ZH) or title), english=False
+                    ) or human
+                    en = WorkflowWebService._owner_humanize_feature_title(
+                        str(title_i18n.get(app_i18n.EN) or title), english=True
+                    ) or human
+                    row["title_i18n"] = app_i18n.pair(zh[:160], en[:160])
+                cleaned_items.append(row)
+            review["items"] = cleaned_items
         return public
 
     def _operations_skill_generation_context(self, state: dict[str, Any], kind: str) -> dict[str, Any]:
@@ -18816,6 +18966,7 @@ class WorkflowWebService:
         lifecycle: dict[str, Any],
         *,
         english: bool = False,
+        study_condition: str = "",
     ) -> list[dict[str, Any]]:
         # The abstraction level of the release payload is the paper's single
         # manipulated variable. Both layers are composed from the SAME candidate
@@ -18824,6 +18975,16 @@ class WorkflowWebService:
         # each item is a proposition about a user completing a task, or about the
         # code and its tests.
         abstraction = str(model.get("release_payload_abstraction") or "task").strip().casefold()
+        condition = str(
+            study_condition
+            or (model.get("release_review") or {}).get("study_condition")
+            or model.get("study_condition")
+            or ""
+        ).strip()
+        # Study participants always see the same owner-facing feature points.
+        # The paper variable is which agent builds the app, not checklist jargon.
+        if condition in {"claude_text", "claude_preview", "applooper_bound"}:
+            abstraction = "task"
         if abstraction == "engineering":
             items = self._compose_engineering_layer_items(model, lifecycle, english=english)
         else:
@@ -19291,10 +19452,26 @@ class WorkflowWebService:
                 if english else
                 "系统已根据实际执行的工程检查形成候选；真实界面证据若有待补验，仍须由你在试用窗口判断。"
             )
+        loop_limit = 20
+        with contextlib.suppress(TypeError, ValueError, OverflowError):
+            loop_limit = max(
+                1,
+                int(
+                    (lifecycle or {}).get("max_rounds")
+                    or (model or {}).get("max_rounds")
+                    or 20
+                ),
+            )
         stop_rule_notice = (
-            "Study stopping rule: the loop freezes and moves to pending publish when the relevant agents judge the candidate suitable for release. At 50 steps the candidate still moves to pending publish if those agents have not yet agreed."
+            (
+                "Study stopping rule: the loop freezes and moves to pending publish when the relevant agents judge the candidate suitable for release. "
+                f"At {loop_limit} steps the candidate still moves to pending publish if those agents have not yet agreed."
+            )
             if english else
-            "研究停止规则：相关智能体判断当前候选适合发布后冻结并转入待发布；满 50 步时即使尚未达成智能体同意也会转入待发布。"
+            (
+                "研究停止规则：相关智能体判断当前候选适合发布后冻结并转入待发布；"
+                f"满 {loop_limit} 步时即使尚未达成智能体同意也会转入待发布。"
+            )
         )
         return self._normalize_acceptance_brief({
             "persona": persona,
@@ -19524,8 +19701,7 @@ class WorkflowWebService:
                 or core.get("title")
                 or ""
             ).strip()
-            # Keep product titles as-is; the engineering title mapper can blank
-            # compound requirement text that still contains .env / port crumbs.
+            title = self._owner_humanize_feature_title(title, english=english) or title
             if not title or self._owner_is_platform_generic_feature_title(title):
                 continue
             item_id = workflow_agent.lifecycle_identifier(
@@ -19836,8 +20012,12 @@ class WorkflowWebService:
         # Compose both catalogs once for the same frozen candidate. Locale is a
         # view concern: changing it must never rebuild evidence, clear checks, or
         # bind the record to whichever language happened to request it first.
-        composed_zh = self._compose_release_review_items(model, lifecycle, english=False)
-        composed_en = self._compose_release_review_items(model, lifecycle, english=True)
+        composed_zh = self._compose_release_review_items(
+            model, lifecycle, english=False, study_condition=condition
+        )
+        composed_en = self._compose_release_review_items(
+            model, lifecycle, english=True, study_condition=condition
+        )
         zh_by_id = {
             str(item.get("id") or ""): item
             for item in composed_zh
@@ -20854,6 +21034,187 @@ class WorkflowWebService:
             "description": text[:1_200],
         }
 
+    TRIAL_JUMP_PLAN_SCHEMA: dict[str, Any] = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["needs_prep"],
+        "properties": {
+            "needs_prep": {"type": "boolean"},
+            "route": {"type": "string"},
+            "storage_key": {"type": "string"},
+            "list_key": {"type": "string"},
+            "ensure_count": {"type": "integer"},
+            "records": {"type": "array", "items": {"type": "object"}},
+            "focus_id": {"type": "string"},
+            "label": {"type": "string"},
+            "howto": {"type": "string"},
+            "target_available": {"type": "boolean"},
+        },
+    }
+
+    _TRIAL_JUMP_SPECIFIC_SCREEN_RE = re.compile(
+        r"界面|页面|screen|victory|胜利|结算|结果页|game\s*over",
+        re.I,
+    )
+
+    @classmethod
+    def _trial_jump_target_available(
+        cls,
+        description: str,
+        declared_routes: list[str],
+        chosen_route: str,
+        llm: dict[str, Any] | None = None,
+    ) -> bool:
+        if llm and "target_available" in llm:
+            return bool(llm.get("target_available"))
+        route = str(chosen_route or "/").strip() or "/"
+        if route.rstrip("/") not in {"", "/"}:
+            return True
+        blob = str(description or "").casefold()
+        for item in declared_routes:
+            token = str(item or "").strip().strip("/").casefold()
+            if token and token in blob:
+                return True
+        return not bool(cls._TRIAL_JUMP_SPECIFIC_SCREEN_RE.search(str(description or "")))
+
+    @classmethod
+    def _scan_trial_storage_profile(cls, state: dict[str, Any], description: str) -> dict[str, str]:
+        """Read the trial app's localStorage key and primary list from source."""
+
+        profile = {"storage_key": "", "list_key": ""}
+        blob = str(description or "").casefold()
+        if re.search(r"宠物|pet", blob):
+            profile["list_key"] = "pets"
+        elif re.search(r"亲友|联系人|好友|friend|contact", blob):
+            profile["list_key"] = "contacts"
+        workspace = Path(str(state.get("workspace") or "")).expanduser()
+        if not workspace.is_dir():
+            return profile
+        key_re = re.compile(
+            r"""(?:STORAGE_KEY|storageKey)\s*=\s*['"]([A-Za-z0-9_-]{2,64})['"]"""
+            r"""|localStorage\.getItem\(\s*['"]([A-Za-z0-9_-]{2,64})['"]"""
+        )
+        list_re = re.compile(
+            r"\b(pets|contacts|friends|items|todos|tasks|records|list)\s*[:=]\s*\["
+        )
+        for path in [*workspace.glob("*.js"), *workspace.glob("*.html"), *workspace.glob("app/*.js")]:
+            if not path.is_file() or path.stat().st_size > 400_000:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if not profile["storage_key"]:
+                match = key_re.search(text)
+                if match:
+                    profile["storage_key"] = match.group(1) or match.group(2) or ""
+            if not profile["list_key"]:
+                match = list_re.search(text)
+                if match:
+                    profile["list_key"] = match.group(1)
+            if profile["storage_key"] and profile["list_key"]:
+                break
+        if not profile["list_key"] and "pets" in blob:
+            profile["list_key"] = "pets"
+        return profile
+
+    @classmethod
+    def _synthetic_trial_records(
+        cls,
+        list_key: str,
+        count: int,
+        *,
+        english: bool = False,
+    ) -> list[dict[str, Any]]:
+        need = max(0, min(8, int(count or 0)))
+        key = str(list_key or "items")
+        if key == "pets":
+            catalog = (
+                (
+                    {"id": "trial-pet-1", "name": "豆豆", "type": "dog", "species": "狗"},
+                    {"id": "trial-pet-2", "name": "奶茶", "type": "cat", "species": "猫"},
+                    {"id": "trial-pet-3", "name": "球球", "type": "hamster", "species": "仓鼠"},
+                )
+                if not english
+                else (
+                    {"id": "trial-pet-1", "name": "Mochi", "type": "dog", "species": "dog"},
+                    {"id": "trial-pet-2", "name": "Mango", "type": "cat", "species": "cat"},
+                    {"id": "trial-pet-3", "name": "Bean", "type": "hamster", "species": "hamster"},
+                )
+            )
+            return [dict(row) for row in catalog[: max(2, need) if need else 0]]
+        if key in {"contacts", "friends"}:
+            catalog = (
+                (
+                    {"id": "trial-p-1", "name": "李伟", "relation": "朋友"},
+                    {"id": "trial-p-2", "name": "张敏", "relation": "家人"},
+                    {"id": "trial-p-3", "name": "王芳", "relation": "同事"},
+                )
+                if not english
+                else (
+                    {"id": "trial-p-1", "name": "Li Wei", "relation": "friend"},
+                    {"id": "trial-p-2", "name": "Zhang Min", "relation": "family"},
+                    {"id": "trial-p-3", "name": "Wang Fang", "relation": "colleague"},
+                )
+            )
+            return [dict(row) for row in catalog[: max(2, need) if need else 0]]
+        rows = []
+        for index in range(need):
+            label = f"Trial item {index + 1}" if english else f"试用条目 {index + 1}"
+            rows.append({"id": f"trial-item-{index + 1}", "title": label, "name": label})
+        return rows
+
+    def _llm_trial_jump_plan(
+        self,
+        state: dict[str, Any],
+        description: str,
+        *,
+        english: bool,
+        heuristic: dict[str, Any],
+        profile: dict[str, str],
+        declared_routes: list[str],
+    ) -> dict[str, Any] | None:
+        """Ask the orchestrator whether this jump needs prepared data."""
+
+        if not str(state.get("run_id") or ""):
+            return None
+        prompt_state = dict(state)
+        prompt_state["agent_timeout"] = 25
+        prompt_state["_namespace_state_writer"] = {"session_roles": ["orchestrator"]}
+        payload = {
+            "owner_request": description[:500],
+            "declared_routes": declared_routes[:12] or ["/"],
+            "storage_profile": profile,
+            "heuristic": {
+                "needs_prep": bool((heuristic.get("trial_seed") or {}).get("needs_prep")),
+                "list_key": str((heuristic.get("trial_seed") or {}).get("list_key") or ""),
+                "route": heuristic.get("route") or "/",
+            },
+            "rules": (
+                "Decide if the owner wants to land on a screen that already has data. "
+                "If they say already added / multiple / batch manage / delete existing, needs_prep=true. "
+                "Only use a declared route. Records must be temporary and product-shaped. "
+                "Set target_available=false when the owner asks for a screen or feature that "
+                "is not in declared_routes. Do not change source code."
+            ),
+        }
+        try:
+            result = workflow_agent.call_claude(
+                prompt_state,
+                "orchestrator",
+                workflow_agent.prompt_json(
+                    "Plan trial jump data" if english else "规划试用跳转数据",
+                    payload,
+                ),
+                self.TRIAL_JUMP_PLAN_SCHEMA,
+                writable=False,
+            )
+        except Exception:
+            return None
+        if not isinstance(result, dict):
+            return None
+        return result
+
     def _plan_trial_sandbox_jump(
         self,
         state: dict[str, Any],
@@ -20871,9 +21232,73 @@ class WorkflowWebService:
             route = str(view.get("route") or "").strip() or "/"
             if route not in declared_routes:
                 declared_routes.append(route)
-        focus["route"] = self._choose_declared_trial_route(description, declared_routes)
-        focus["trial_seed"] = self._normalize_owner_trial_seed(guidance.get("trial_seed"))
-        focus["howto"] = str(guidance.get("howto") or "")[:500]
+        heuristic_route = self._choose_declared_trial_route(description, declared_routes)
+        profile = self._scan_trial_storage_profile(state, description)
+        seed = self._normalize_owner_trial_seed(guidance.get("trial_seed"))
+        if profile.get("storage_key"):
+            seed["storage_key"] = profile["storage_key"]
+        if profile.get("list_key") and not seed.get("list_key"):
+            seed["list_key"] = profile["list_key"]
+        llm = self._llm_trial_jump_plan(
+            state,
+            description,
+            english=english,
+            heuristic={"trial_seed": seed, "route": heuristic_route},
+            profile=profile,
+            declared_routes=declared_routes,
+        )
+        chosen_route = heuristic_route
+        llm_route = str((llm or {}).get("route") or "").strip()
+        if llm_route and declared_routes:
+            declared_map = {(row.rstrip("/") or "/"): row for row in declared_routes}
+            mapped = declared_map.get(llm_route.rstrip("/") or "/")
+            if mapped:
+                chosen_route = mapped
+        focus["route"] = chosen_route or "/"
+        if llm:
+            if llm.get("needs_prep"):
+                seed["needs_prep"] = True
+            if llm.get("storage_key"):
+                cleaned_key = re.sub(r"[^A-Za-z0-9_-]", "", str(llm.get("storage_key")))[:64]
+                if cleaned_key:
+                    seed["storage_key"] = cleaned_key
+            if llm.get("list_key"):
+                cleaned_list = re.sub(r"[^A-Za-z0-9_-]", "", str(llm.get("list_key")))[:32]
+                if cleaned_list:
+                    seed["list_key"] = cleaned_list
+            llm_records = [
+                item
+                for item in (self._sanitize_trial_record(row) for row in (llm.get("records") or [])[:8])
+                if item
+            ]
+            if llm_records:
+                seed["records"] = llm_records
+                seed["needs_prep"] = True
+            if llm.get("howto"):
+                focus["howto"] = str(llm.get("howto") or "")[:500]
+            if llm.get("label"):
+                label = str(llm.get("label") or "")[:200]
+                if english:
+                    focus["label_en"] = label
+                else:
+                    focus["label_zh"] = label
+        if seed.get("needs_prep") and not seed.get("records"):
+            count = max(int(seed.get("ensure_count") or seed.get("ensure_logs") or 0), 2)
+            seed["records"] = self._synthetic_trial_records(
+                str(seed.get("list_key") or profile.get("list_key") or "items"),
+                count,
+                english=english,
+            )
+        if seed.get("records"):
+            seed["needs_prep"] = True
+            seed["ensure_count"] = max(int(seed.get("ensure_count") or 0), len(seed["records"]))
+            seed["ensure_logs"] = seed["ensure_count"]
+        focus["trial_seed"] = self._normalize_owner_trial_seed(seed)
+        if not focus.get("howto"):
+            focus["howto"] = str(guidance.get("howto") or "")[:500]
+        focus["target_available"] = self._trial_jump_target_available(
+            description, declared_routes, chosen_route, llm
+        )
         return focus
 
     @staticmethod
@@ -20899,27 +21324,34 @@ class WorkflowWebService:
         english = self._normalize_ui_locale(locale) == "en"
         with self.run_lock(run_id):
             state = self.load_app_state(run_id)
-            focus = self._plan_trial_sandbox_jump(state, description, english=english)
+        focus = self._plan_trial_sandbox_jump(state, description, english=english)
         if not focus["description"]:
             raise APIError(HTTPStatus.BAD_REQUEST, "empty_description", "请填写要试用的功能")
         jumped = False
         jump_error = ""
-        try:
-            surfaces = self.remote_experience_surfaces(state)
-            surface = next((item for item in surfaces if self._is_isolated_web_surface(item)), None)
-            if surface is None and surfaces:
-                surface = surfaces[0]
-            if surface is not None:
-                runtime = None
-                with self._surface_runtime_lock:
-                    runtime = self._surface_runtimes.get((run_id, str(surface.get("id") or "")))
-                if runtime is not None:
-                    base = str(getattr(runtime.config, "url", "") or "")
-                    target = urllib.parse.urljoin(base if base.endswith("/") else base + "/", str(focus["route"] or "/").lstrip("/"))
-                    runtime.navigate_trial(target, focus.get("trial_seed"))
-                    jumped = True
-        except Exception as exc:
-            jump_error = str(exc)[:240]
+        if focus.get("target_available") is False:
+            jump_error = "target_not_available"
+        else:
+            try:
+                surfaces = self.remote_experience_surfaces(state)
+                surface = next((item for item in surfaces if self._is_isolated_web_surface(item)), None)
+                if surface is None and surfaces:
+                    surface = surfaces[0]
+                if surface is None:
+                    jump_error = "trial_window_not_ready"
+                else:
+                    runtime = None
+                    with self._surface_runtime_lock:
+                        runtime = self._surface_runtimes.get((run_id, str(surface.get("id") or "")))
+                    if runtime is None:
+                        jump_error = "trial_window_not_ready"
+                    else:
+                        base = str(getattr(runtime.config, "url", "") or "")
+                        target = urllib.parse.urljoin(base if base.endswith("/") else base + "/", str(focus["route"] or "/").lstrip("/"))
+                        runtime.navigate_trial(target, focus.get("trial_seed"))
+                        jumped = True
+            except Exception as exc:
+                jump_error = str(exc)[:240]
         with self.run_lock(run_id):
             state = self.load_app_state(run_id)
             focus_id = "trial-focus-" + uuid.uuid4().hex[:12]
@@ -20934,6 +21366,7 @@ class WorkflowWebService:
                 "preparation_kind": focus["preparation_kind"],
                 "trial_seed": dict(focus.get("trial_seed") or {}),
                 "howto": str(focus.get("howto") or "")[:500],
+                "target_available": focus.get("target_available") is not False,
                 "status": "jumped" if jumped else "queued",
                 "jumped": jumped,
                 "sandbox": False,
@@ -20947,21 +21380,6 @@ class WorkflowWebService:
             history.append(record)
             state["trial_sandbox_focus"] = record
             state["trial_sandbox_focus_history"] = history[-20:]
-            if english:
-                body = (
-                    "[Owner trial jump]\n"
-                    f"The owner wants to try: {focus['description']}\n"
-                    "In the already-open trial window only: prepare temporary synthetic state "
-                    "(for example add one deletable item before a delete trial) and jump to that screen. "
-                    "Do not change source code and do not start a new development round."
-                )
-            else:
-                body = (
-                    "【所有者试用跳转】\n"
-                    f"所有者想试用：{focus['description']}\n"
-                    "只在当前已打开的试用窗口中准备临时状态（例如删除功能先放入一条可删条目），并跳转到对应界面。"
-                    "不要改源码，不要开启新的研发轮次。"
-                )
             workflow_agent.event(
                 state,
                 "trial_sandbox_configured",
@@ -20987,24 +21405,12 @@ class WorkflowWebService:
                 "trial_focus",
                 persist_focus,
             )
-        message_queued = False
-        if not jumped:
-            self.submit_message(
-                run_id,
-                {
-                    "text": body,
-                    "channel": "main",
-                    "mention_target": "developer",
-                    "client_request_id": f"trial-sandbox-{focus_id}",
-                },
-            )
-            message_queued = True
         with self.run_lock(run_id):
             state = self.load_app_state(run_id)
             record = dict(state.get("trial_sandbox_focus") or record)
         return {
             "focus": record,
-            "message_queued": message_queued,
+            "message_queued": False,
             "jumped": jumped,
             "jump_error": jump_error,
             "owner_proxy_pending": False,
@@ -21731,6 +22137,11 @@ class WorkflowWebService:
             raise APIError(HTTPStatus.FORBIDDEN, "view_capability_mismatch", "观看凭据与请求不匹配")
         return record
 
+    def _resolve_community_view_surface_id(self, run_id: str, requested: Any) -> str:
+        surfaces = self.remote_experience_surfaces(self.load_app_state(run_id))
+        surface = self._resolve_requested_experience_surface(surfaces, requested)
+        return str((surface or {}).get("id") or "")
+
     def create_community_view_session(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Open an isolated, read-only surface of a community-published app for a
         viewer, after consuming a one-shot viewing capability. Trusted-local only.
@@ -21765,7 +22176,9 @@ class WorkflowWebService:
         # deploy/participant-tenant/viewer-isolation.md. This method returns the
         # key; it does not (and cannot) enforce backend isolation from Python.
         viewer_session_key = "cv-" + secrets.token_hex(8)
-        surface_id = payload.get("surface_id")
+        surface_id = self._resolve_community_view_surface_id(
+            run_id, payload.get("surface_id") or payload.get("surface")
+        )
         session = self.create_remote_experience_session(
             run_id, {"surface_id": surface_id} if surface_id else {}
         )
@@ -23451,7 +23864,7 @@ class WorkflowWebService:
                 if str(item or "").strip()
             ][:20],
             "developmental_experience_round_limit": (
-                workflow_agent.developmental_experience_round_limit()
+                workflow_agent.developmental_experience_round_limit(state)
             ),
             **self._public_coding_agent_settings(state),
         }
@@ -23703,6 +24116,10 @@ class WorkflowWebService:
             # are queued as synthetic inbound messages; hide them from the user.
             if raw_row.get("pm_dispatch") and str(raw_row.get("direction") or "") == "inbound":
                 continue
+            if workflow_agent.is_owner_trial_jump_text(
+                str(raw_row.get("body") or raw_row.get("text") or "")
+            ):
+                continue
             direction = str(raw_row.get("direction") or "")
             if direction not in {"inbound", "outbound"}:
                 continue
@@ -23717,6 +24134,13 @@ class WorkflowWebService:
             if message_id:
                 known_message_ids.add(message_id)
         rows.extend(self._queued_inbox_rows(state, known_message_ids))
+        rows = [
+            item
+            for item in rows
+            if not workflow_agent.is_owner_trial_jump_text(
+                str(item[1].get("body") or item[1].get("text") or "")
+            )
+        ]
         if channel:
             rows = [
                 item

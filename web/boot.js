@@ -1,7 +1,7 @@
 "use strict";
 
 (() => {
-  const SHELL_VERSION = "208";
+  const SHELL_VERSION = "209";
   const CACHE_PREFIX = "applooper-web-";
   // Funnel relay latency can occasionally exceed 20 seconds even while the
   // local service is healthy. Keep this bounded, but do not report a false
