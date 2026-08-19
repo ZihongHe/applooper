@@ -23965,6 +23965,22 @@ class WorkflowWebService:
                 return values
         return []
 
+    @staticmethod
+    def _row_attachment_captions(state: dict[str, Any], row: dict[str, Any]) -> list[str]:
+        captions = row.get("attachment_captions")
+        if isinstance(captions, list):
+            return [str(item or "").strip() for item in captions]
+        outbox_key = str(row.get("outbox_key") or "")
+        if not outbox_key:
+            return []
+        for name in ("web_outbox", "mail_outbox"):
+            outbox = state.get(name)
+            record = outbox.get(outbox_key) if isinstance(outbox, dict) else None
+            values = record.get("attachment_captions") if isinstance(record, dict) else None
+            if isinstance(values, list):
+                return [str(item or "").strip() for item in values]
+        return []
+
     def _upload_record_paths(self, run_id: str) -> Iterator[Path]:
         records = self.run_dir(run_id) / "uploads" / "records"
         if records.is_dir():
@@ -24171,6 +24187,12 @@ class WorkflowWebService:
         messages: list[dict[str, Any]] = []
         for event_id, row in rows:
             descriptors: list[dict[str, Any]] = []
+            actor = row.get("actor") or ("user" if row.get("direction") == "inbound" else "developer")
+            actor_key = str(actor or "").strip().casefold()
+            user_content = bool(row.get("user_content")) or (
+                str(row.get("direction") or "").casefold() == "inbound"
+                and actor_key in {"", "user", "owner", "human"}
+            )
             queued_attachment_ids = row.get("attachment_ids") if row.get("delivery_status") == "queued" else None
             if isinstance(queued_attachment_ids, list):
                 for raw_attachment_id in queued_attachment_ids:
@@ -24178,6 +24200,10 @@ class WorkflowWebService:
                     try:
                         upload, path = self._load_upload_record(run_id, attachment_id)
                     except APIError:
+                        continue
+                    if not user_content and not workflow_agent.is_screenshot_file(
+                        Path(str(upload.get("filename") or path.name))
+                    ):
                         continue
                     descriptors.append(
                         {
@@ -24191,12 +24217,16 @@ class WorkflowWebService:
                         }
                     )
             else:
+                captions = self._row_attachment_captions(state, row)
                 for index, raw in enumerate(self._row_attachments(state, row)):
                     path = self._safe_message_path(state, raw)
                     if path is None:
                         continue
+                    if not user_content and not workflow_agent.is_screenshot_file(path):
+                        continue
                     upload = uploaded.get(path, {})
                     attachment_id = self._message_attachment_id(event_id, index, path)
+                    caption = captions[index] if index < len(captions) else ""
                     descriptors.append(
                         {
                             "id": attachment_id,
@@ -24206,15 +24236,10 @@ class WorkflowWebService:
                             ),
                             "size": path.stat().st_size,
                             "url": f"/api/apps/{run_id}/attachments/{attachment_id}",
+                            "caption": caption,
                         }
                     )
             message_id = str(row.get("message_id") or event_id)
-            actor = row.get("actor") or ("user" if row.get("direction") == "inbound" else "developer")
-            actor_key = str(actor or "").strip().casefold()
-            user_content = bool(row.get("user_content")) or (
-                str(row.get("direction") or "").casefold() == "inbound"
-                and actor_key in {"", "user", "owner", "human"}
-            )
             text_source = dict(row)
             persona_channel_match = re.fullmatch(
                 r"experience:(.+)", str(row.get("channel") or ""), re.I
@@ -24247,6 +24272,8 @@ class WorkflowWebService:
                 text_source["title"] = text_source.get("subject")
             if not text_source.get("title_i18n") and isinstance(text_source.get("subject_i18n"), Mapping):
                 text_source["title_i18n"] = text_source.get("subject_i18n")
+            if not user_content:
+                workflow_agent.apply_first_delivery_wait_copy(text_source)
             message = {
                 "id": event_id,
                 "message_id": message_id,
@@ -24393,7 +24420,7 @@ class WorkflowWebService:
                     )
                 )
             messages.append(message)
-        return messages
+        return workflow_agent.rehome_developer_experience_screenshots(messages)
 
     def _explicit_user_deployment_context(self, state: dict[str, Any]) -> list[str]:
         """Return recent deployment facts explicitly supplied by the user.
