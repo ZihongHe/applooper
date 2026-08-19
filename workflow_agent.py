@@ -8752,6 +8752,8 @@ class Mailer:
         if not is_question_mail:
             title = public_non_question_text(title, "工作流更新")
             body = public_non_question_text(body, "工作流状态已更新。")
+        if is_public_developer_actor(actor):
+            attachments = []
         key = key or "mail:" + hashlib.sha256(f"{channel}\0{title}\0{body}\0{token}".encode()).hexdigest()[:24]
         outbox = state.setdefault("mail_outbox", {})
         record = outbox.get(key)
@@ -9031,6 +9033,8 @@ class WebChannel:
         if not is_question:
             safe_title = public_non_question_text(safe_title, "工作流更新")
             safe_body = public_non_question_text(safe_body, "工作流状态已更新。")
+        if is_public_developer_actor(actor):
+            attachments = []
         key = key or "web:" + hashlib.sha256(f"{channel}\0{safe_title}\0{safe_body}\0{token}".encode()).hexdigest()[:24]
         outbox = state.setdefault("web_outbox", {})
         record = outbox.get(key)
@@ -9228,6 +9232,67 @@ def screenshot_content_key(path: Path) -> str:
     return f"{path.stat().st_size}:{digest.hexdigest()}"
 
 
+SCREENSHOT_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"}
+PUBLIC_EXPERIENCE_SCREENSHOT_ACTORS = frozenset(
+    {"experience", "persona", "owner_intent", "owner_proxy"}
+)
+PUBLIC_DEVELOPER_ACTORS = frozenset({"developer", "orchestrator"})
+
+
+def is_screenshot_file(path: Path | str) -> bool:
+    """Public page captures are images; HTML/source files stay out of chat."""
+
+    return Path(path).suffix.lower() in SCREENSHOT_SUFFIXES
+
+
+def is_public_experience_screenshot_actor(actor: Any) -> bool:
+    return str(actor or "").strip().casefold() in PUBLIC_EXPERIENCE_SCREENSHOT_ACTORS
+
+
+def is_public_developer_actor(actor: Any) -> bool:
+    return str(actor or "").strip().casefold() in PUBLIC_DEVELOPER_ACTORS
+
+
+def rehome_developer_experience_screenshots(messages: list[Any]) -> list[Any]:
+    """Show Computer Use shots on virtual-user / owner-intent bubbles only."""
+
+    if not isinstance(messages, list) or not messages:
+        return messages
+    changed = False
+    out: list[Any] = []
+    last_target_index: int | None = None
+    for message in messages:
+        if not isinstance(message, dict):
+            out.append(message)
+            continue
+        attachments = message.get("attachments")
+        has_shots = isinstance(attachments, list) and bool(attachments)
+        if is_public_experience_screenshot_actor(message.get("actor")):
+            out.append(message)
+            last_target_index = len(out) - 1
+            continue
+        if is_public_developer_actor(message.get("actor")) and has_shots:
+            item = dict(message)
+            item["attachments"] = []
+            if "attachment_captions" in item:
+                item["attachment_captions"] = []
+            if last_target_index is not None:
+                target = out[last_target_index]
+                target_shots = target.get("attachments") if isinstance(target, dict) else None
+                if isinstance(target, dict) and not (isinstance(target_shots, list) and target_shots):
+                    moved = dict(target)
+                    moved["attachments"] = list(attachments)
+                    captions = message.get("attachment_captions")
+                    if isinstance(captions, list):
+                        moved["attachment_captions"] = list(captions)
+                    out[last_target_index] = moved
+            out.append(item)
+            changed = True
+            continue
+        out.append(message)
+    return out if changed else messages
+
+
 def unique_screenshot_paths(state: dict[str, Any], values: Any, *, limit: int = 20) -> list[str]:
     """Keep safe screenshots once by image content, even when tools copied the file."""
     raw_values = [values] if isinstance(values, str) else values
@@ -9237,7 +9302,7 @@ def unique_screenshot_paths(state: dict[str, Any], values: Any, *, limit: int = 
     seen: set[str] = set()
     for raw in raw_values:
         path = safe_screenshot(state, str(raw))
-        if path is None:
+        if path is None or not is_screenshot_file(path):
             continue
         try:
             key = screenshot_content_key(path)
@@ -14268,12 +14333,7 @@ def accumulate_progress_update(
     reporting["milestones_since_flush"] = int(reporting.get("milestones_since_flush") or 0) + 1
     reporting["last_phase"] = str(phase or state.get("phase") or "")
     reporting["last_round"] = int(round_num or state.get("round") or 0)
-    stored_attachments = list(reporting.setdefault("pending_attachments", []))
-    for attachment in attachments or []:
-        path = str(attachment)
-        if path and path not in stored_attachments:
-            stored_attachments.append(path)
-    reporting["pending_attachments"] = stored_attachments[-6:]
+    reporting["pending_attachments"] = []
 
 
 def maybe_flush_progress_digest(
@@ -14313,7 +14373,7 @@ def maybe_flush_progress_digest(
         mailer,
         body,
         body,
-        list(reporting.get("pending_attachments") or []),
+        [],
     )
     if progress_is_unacknowledged(state):
         reporting["unread_flush_streak"] = int(reporting.get("unread_flush_streak") or 0) + 1
@@ -16661,7 +16721,7 @@ def send_developer_feedback_updates(
                 f"研发更新 · {persona_name}",
                 body,
                 key=f"developer-feedback-update:{state.get('round', 0)}:{persona_id}:{fingerprint}",
-                attachments=attachments,
+                attachments=[],
                 channel=f"experience:{persona_id}",
                 actor="developer",
                 persona_name=persona_name,
@@ -16711,7 +16771,7 @@ def send_developer_feedback_updates(
             f"研发更新 · {persona_name}" if not english else f"Developer update · {persona_name}",
             body,
             key=f"developer-feedback-update:{loop_num}:{persona_id}:{fingerprint}",
-            attachments=attachments,
+            attachments=[],
             channel=channel,
             actor="developer",
             persona_name=persona_name,
@@ -18220,7 +18280,7 @@ def developer_welcome_copy(state: dict[str, Any]) -> tuple[str, str]:
     if english:
         body = (
             f"The developer agent has started building: {intent}\n\n"
-            "The first version usually takes about half an hour. You can leave this page "
+            "The first version takes 10 to 60 minutes. You can leave this page "
             "in the meantime; development continues. After that first delivery, you can "
             "try the app online in the Trial tab. Test agents and representative users "
             "will then try it and send clear feedback here. You can add ideas at any time."
@@ -18228,16 +18288,70 @@ def developer_welcome_copy(state: dict[str, Any]) -> tuple[str, str]:
     else:
         body = (
             f"研发智能体已经开始构建：{intent}\n\n"
-            "初版交付大约需要半个小时。这段时间你可以先挂起或离开页面，系统会继续研发。"
+            "初版交付时间为 10 到 60 分钟不等。这段时间你可以先挂起或离开页面，系统会继续研发。"
             "初版交付后，你可以在「试用」页签在线体验我交付的应用。"
             "随后测试智能体和具有代表性的虚拟用户会实际试用，并把清晰的反馈发到这里。你也可以随时补充想法。"
         )
     return title, body
 
 
+_FIRST_DELIVERY_WAIT_REWRITES = (
+    ("初版交付大约需要半个小时", "初版交付时间为 10 到 60 分钟不等"),
+    ("The first version usually takes about half an hour", "The first version takes 10 to 60 minutes"),
+    ("usually takes about half an hour", "takes 10 to 60 minutes"),
+    ("takes about half an hour", "takes 10 to 60 minutes"),
+)
+
+
 def welcome_mentions_first_delivery_wait(text: str) -> bool:
     value = str(text or "")
-    return "半个小时" in value or "half an hour" in value
+    return (
+        "10 到 60 分钟" in value
+        or "10 to 60 minutes" in value
+        or "10-60 minutes" in value
+    )
+
+
+def rewrite_first_delivery_wait_copy(text: str) -> str:
+    """Show the current first-delivery wait on already-sent starting bubbles."""
+
+    value = str(text or "")
+    for old, new in _FIRST_DELIVERY_WAIT_REWRITES:
+        if old in value:
+            value = value.replace(old, new)
+    if "我实际试了这些" in value or "没做成：" in value or "没做成:" in value or "What I tried:" in value:
+        on_computer = "电脑" in value or "浏览器" in value
+        on_phone = "手机" in value
+        value = value.replace("我实际试了这些：", "").replace("我实际试了这些", "")
+        value = value.replace("我发现的问题：", "").replace("我发现的问题", "")
+        value = value.replace("What I tried:", "").replace("What I found:", "")
+        value = re.sub(r"没做成[:：]\s*", "当我", value)
+        value = re.sub(r"当我([^\n。]+)(?!的时候)", r"当我\1的时候，发现这一步做不下去。", value)
+        value = re.sub(r"I could not:\s*", "When I tried to ", value)
+        value = re.sub(r"\n{3,}", "\n\n", value).strip()
+        if "我在电脑上" not in value and "我用手机" not in value and "I'm on" not in value:
+            if on_phone:
+                value = "我用手机，按平时习惯打开了这个应用。\n" + value
+            elif on_computer:
+                value = "我在电脑上，按平时习惯打开了这个应用。\n" + value
+    return value
+
+
+def apply_first_delivery_wait_copy(record: dict[str, Any]) -> None:
+    if not isinstance(record, dict):
+        return
+    for key in ("body", "text", "summary"):
+        raw = record.get(key)
+        if isinstance(raw, str):
+            record[key] = rewrite_first_delivery_wait_copy(raw)
+    for key in ("body_i18n", "text_i18n"):
+        pair = record.get(key)
+        if not isinstance(pair, dict):
+            continue
+        record[key] = {
+            name: rewrite_first_delivery_wait_copy(str(item)) if isinstance(item, str) else item
+            for name, item in pair.items()
+        }
 
 
 def ensure_developer_welcome(state: dict[str, Any], mailer: Mailer | WebChannel) -> None:
@@ -18246,13 +18360,39 @@ def ensure_developer_welcome(state: dict[str, Any], mailer: Mailer | WebChannel)
     title, body = developer_welcome_copy(state)
     outbox = state.get("web_outbox") if isinstance(state.get("web_outbox"), dict) else {}
     record = outbox.get("welcome") if isinstance(outbox, dict) else None
+    ledger = state.get("conversation_ledger") if isinstance(state.get("conversation_ledger"), dict) else {}
+    stale_rows = [
+        row
+        for row in (ledger.values() if isinstance(ledger, dict) else [])
+        if isinstance(row, dict)
+        and (
+            str(row.get("outbox_key") or "") == "welcome"
+            or str(row.get("title") or row.get("subject") or "") in {"研发已开始", "Development started"}
+            or "半个小时" in str(row.get("body") or "")
+            or "half an hour" in str(row.get("body") or "")
+        )
+    ]
     if isinstance(record, dict) and welcome_mentions_first_delivery_wait(str(record.get("body") or "")):
+        if stale_rows:
+            for row in stale_rows:
+                apply_first_delivery_wait_copy(row)
+                if str(row.get("outbox_key") or "") == "welcome" or str(row.get("title") or row.get("subject") or "") in {
+                    "研发已开始",
+                    "Development started",
+                }:
+                    row["title"] = title
+                    row["subject"] = title
+                    row["body"] = body
+            save_state(state)
         state["welcome_sent"] = True
         return
     if isinstance(record, dict):
         record["title"] = title
         record["body"] = body
-        ledger = state.get("conversation_ledger")
+        for row in stale_rows or []:
+            row["title"] = title
+            row["subject"] = title
+            row["body"] = body
         if isinstance(ledger, dict):
             for row in ledger.values():
                 if isinstance(row, dict) and str(row.get("outbox_key") or "") == "welcome":
@@ -25339,33 +25479,15 @@ def phase_deliver(state: dict[str, Any], mailer: Mailer) -> None:
         body += "\n\n体验说明：AppLooper 的外部浏览器运行环境不可用；已记录为待补验，不会被误报为产品缺陷，也不会重复触发研发循环。"
     if delivered_changes:
         body += "\n\n本轮完成：\n" + "\n".join(f"- {item}" for item in delivered_changes)
-    shots = list((state.get("last_developer") or {}).get("screenshots") or [])
-    for result in state.get("last_experience") or []:
-        shots.extend(result.get("screenshots") or [])
     delivery_key = f"delivery:{candidate}:{guardrail_fingerprint(state)}:{state.get('cycle_started_round', 0)}"
-    if str(state.get("study_condition") or "").strip() and not study_project_manager_enabled(state):
-        # Study ops-off: developer agent owns the publish call-to-action (@participant).
-        mailer.send(
-            state,
-            "已达到发布条件",
-            (
-                "@你 当前版本已达到发布条件。"
-                "请切换到顶部的「发布」页签，按清单完成自验证后进行发布操作。"
-            ),
-            key=f"study-publish-ready:{candidate}:{state.get('cycle_started_round', 0)}",
-            attachments=[str(x) for x in shots],
-            actor="developer",
-            meta={"pm_mentions": ["user"]},
-        )
-    else:
-        mailer.send(
-            state,
-            f"{release.get('label') or '候选版本'}已完成，可以准备发布",
-            body,
-            key=delivery_key,
-            attachments=[str(x) for x in shots],
-            actor="developer",
-        )
+    mailer.send(
+        state,
+        f"{release.get('label') or '候选版本'}已完成，可以准备发布",
+        body,
+        key=delivery_key,
+        attachments=[],
+        actor="developer",
+    )
     state["phase"] = "DELIVERED"
     state["status"] = "delivered_listening"
     state["delivered_candidate"] = candidate
@@ -25448,8 +25570,8 @@ def workflow_step(state: dict[str, Any], mailer: Mailer) -> None:
             set_public_work_summary(
                 state,
                 kind="published",
-                current="该流程的应用版本已完成验收并发布，实验版本已冻结",
-                next_step="继续完成后续匿名应用体验与问卷",
+                current="该应用版本已完成验收并发布",
+                next_step="可在发布页签下载当前软件包，或继续补充想法",
             )
             event(state, "study_publication_frozen", candidate_id=freeze_id)
             save_state(state)

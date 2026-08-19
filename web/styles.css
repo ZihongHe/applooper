@@ -6000,6 +6000,25 @@ body.experience-twin-fullscreen-fallback .experience-twin-frames {
   background: #f0f2f5;
 }
 
+.attachment-media.is-image {
+  overflow: hidden;
+}
+
+.attachment-link {
+  display: block;
+  max-width: 100%;
+}
+
+.attachment-caption {
+  display: block;
+  margin: 0;
+  padding: 6px 8px 8px;
+  color: var(--muted, #5c6570);
+  font-size: 12px;
+  line-height: 1.4;
+  background: #f7f8fa;
+}
+
 .attachment-media.is-loading {
   min-height: 104px;
 }
@@ -6072,7 +6091,8 @@ body.experience-twin-fullscreen-fallback .experience-twin-frames {
   transition: opacity 180ms ease;
 }
 
-.attachment-media.is-image.is-loaded img {
+.attachment-media.is-image.is-loaded img,
+.attachment-link.is-loaded img {
   opacity: 1;
 }
 

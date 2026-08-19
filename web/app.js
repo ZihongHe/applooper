@@ -7265,20 +7265,6 @@
     return firstText(app?.id, app?.app_id, app?.run_id, app?.workflow_id);
   }
 
-  function appWorkflowType(app) {
-    const stable = firstText(app?.workflow_type, app?.workflowType).trim().toUpperCase();
-    if (/^[AB]$/.test(stable)) return stable;
-    const legacy = firstText(app?.name, app?.title);
-    const match = legacy.match(/^\s*(?:流程类型|Workflow\s+Type)\s*([AB])\s*[·•|]\s*/i);
-    return match ? match[1].toUpperCase() : "";
-  }
-
-  function legacyWorkflowAppType(app) {
-    const legacy = firstText(app?.name, app?.title);
-    const match = legacy.match(/^\s*(?:流程类型|Workflow\s+Type)\s*[AB]\s*[·•|]\s*(.+?)\s*$/i);
-    return firstText(match?.[1]);
-  }
-
   function appTitle(app) {
     const title = localizedFirstField(app, ["name", "title", "app_type", "type"]);
     if (title) return title;
@@ -7309,32 +7295,6 @@
     return `${state.currentId}\u0000${rows}`;
   }
 
-  function studyAppSortLetter(app, index = 0) {
-    const typed = appWorkflowType(app);
-    if (typed === "A" || typed === "B") return typed;
-    const title = appTitle(app);
-    if (/流程类型\s*B|Workflow Type B/i.test(title)) return "B";
-    if (/流程类型\s*A|Workflow Type A/i.test(title)) return "A";
-    return index === 0 ? "A" : "B";
-  }
-
-  function sortedStudyApps(apps = state.apps) {
-    const rows = Array.isArray(apps) ? apps.slice() : [];
-    const hasStudyPair = rows.some((app) => {
-      const letter = studyAppSortLetter(app);
-      return letter === "A" || letter === "B";
-    });
-    if (!hasStudyPair) return rows;
-    return rows.sort((left, right) => {
-      const leftLetter = studyAppSortLetter(left, 0);
-      const rightLetter = studyAppSortLetter(right, 1);
-      if (leftLetter === rightLetter) return String(appId(left) || "").localeCompare(String(appId(right) || ""));
-      if (leftLetter === "A") return -1;
-      if (rightLetter === "A") return 1;
-      return String(appId(left) || "").localeCompare(String(appId(right) || ""));
-    });
-  }
-
   function renderAppList() {
     const fingerprint = appListFingerprint();
     if (fingerprint === state.lastAppListFingerprint && dom.appList.childElementCount) return;
@@ -7347,7 +7307,7 @@
       return;
     }
 
-    sortedStudyApps(state.apps).forEach((app) => {
+    state.apps.forEach((app) => {
       const id = appId(app);
       const button = element("button", `app-item${id === state.currentId ? " is-active" : ""}`);
       button.type = "button";
@@ -17420,16 +17380,23 @@
     let visualIndex = 0;
     prepared.forEach(({ info, url }) => {
       if (info.kind === "image" && url) {
-        const wrap = element("a", "attachment-media is-image");
+        const wrap = element("figure", "attachment-media is-image");
         wrap.setAttribute("data-user-content", "");
-        wrap.href = url;
-        wrap.target = "_blank";
-        wrap.rel = "noopener";
-        wrap.title = t("media.original");
+        const link = element("a", "attachment-link");
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.title = info.caption || t("media.original");
         const image = document.createElement("img");
-        image.alt = info.name || t("media.image");
+        image.alt = info.caption || info.name || t("media.image");
         image.loading = "eager";
-        prepareAttachmentImage(wrap, image, url);
+        prepareAttachmentImage(link, image, url);
+        wrap.append(link);
+        if (info.caption) {
+          const caption = element("figcaption", "attachment-caption");
+          caption.textContent = info.caption;
+          wrap.append(caption);
+        }
         visualIndex += 1;
         if (visualCount > 4 && visualIndex > 4) {
           wrap.hidden = true;
@@ -17520,10 +17487,16 @@
     loading.append(element("span", "progress-spinner"), element("span", "", t("media.loading")));
     wrap.classList.add("is-loading");
     wrap.append(image, loading);
+    const media = wrap.closest(".attachment-media") || wrap;
 
+    const markLoaded = (node) => {
+      node.classList.remove("is-loading", "has-error");
+      node.classList.add("is-loaded");
+    };
     const showLoaded = () => {
-      wrap.classList.remove("is-loading", "has-error");
-      wrap.classList.add("is-loaded");
+      markLoaded(wrap);
+      if (media !== wrap) markLoaded(media);
+      image.style.opacity = "1";
       loading.remove();
     };
     const showError = () => {
@@ -17552,6 +17525,7 @@
       { once: true }
     );
     image.src = url;
+    if (image.complete && image.naturalWidth > 0) showLoaded();
   }
 
   async function prepareAttachmentImageRetry(wrap, image, loading, url, showLoaded, showError) {
@@ -17794,10 +17768,38 @@
     return stripExperiencePersonaIntro(messageText(message));
   }
 
+  function isHumanAuthoredPublicMessage(message) {
+    const actor = firstText(message?.actor, message?.role, message?.sender_type, message?.source).toLowerCase();
+    return ["user", "owner", "human"].includes(actor);
+  }
+
+  function rewritePublicAgentCopy(text) {
+    let value = String(text || "");
+    value = value.replace(/初版交付大约需要半个小时/g, "初版交付时间为 10 到 60 分钟不等");
+    value = value.replace(/The first version usually takes about half an hour/g, "The first version takes 10 to 60 minutes");
+    value = value.replace(/usually takes about half an hour/g, "takes 10 to 60 minutes");
+    value = value.replace(/takes about half an hour/g, "takes 10 to 60 minutes");
+    if (value.includes("我实际试了这些") || value.includes("没做成：") || value.includes("没做成:") || value.includes("What I tried:")) {
+      const onComputer = value.includes("电脑") || value.includes("浏览器");
+      const onPhone = value.includes("手机");
+      value = value.replace(/我实际试了这些：?/g, "").replace(/我发现的问题：?/g, "");
+      value = value.replace(/What I tried:/g, "").replace(/What I found:/g, "");
+      value = value.replace(/没做成[:：]\s*/g, "当我");
+      value = value.replace(/当我([^\n。]+)(?!的时候)/g, "当我$1的时候，发现这一步做不下去。");
+      value = value.replace(/I could not:\s*/g, "When I tried to ");
+      value = value.replace(/\n{3,}/g, "\n\n").trim();
+      if (!value.includes("我在电脑上") && !value.includes("我用手机") && !value.includes("I'm on")) {
+        if (onPhone) value = "我用手机，按平时习惯打开了这个应用。\n" + value;
+        else if (onComputer) value = "我在电脑上，按平时习惯打开了这个应用。\n" + value;
+      }
+    }
+    return value;
+  }
+
   function messageText(message) {
     const content = message?.content;
     const userAuthored = isUserAuthoredMessage(message);
-    const text = userAuthored
+    const resolved = userAuthored
       ? (typeof content === "string"
           ? content
           : firstText(message?.text, message?.body, message?.summary, content?.text, content?.body))
@@ -17807,6 +17809,9 @@
             ? I18N.resolvePair(content, state.locale, "")
             : localizedFirstField(content, ["text", "body"])
         );
+    const text = String(
+      (isHumanAuthoredPublicMessage(message) ? resolved : rewritePublicAgentCopy(resolved)) || ""
+    );
     if (state.locale !== "zh-CN" || userAuthored) return text;
     return text.replace(
       /将在约\s*(\d+)\s*秒后自动重试；无需手动\s*resume。/g,
@@ -17923,6 +17928,7 @@
       mime,
       size: Number(attachment?.size || attachment?.bytes || 0),
       kind: mediaKind(mime, name),
+      caption: firstText(attachment?.caption, attachment?.alt, attachment?.label),
     };
   }
 
