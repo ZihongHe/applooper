@@ -87,6 +87,9 @@ EXPERIENCE_TRIAGE_TYPES = {"product_issue", "verification_gap", "environment_blo
 INTERNAL_TEST_COHORT_SIZE = 2
 TREATMENT_INTERNAL_TEST_COHORT_SIZE = 2
 TREATMENT_EXPERIENCE_WAVE_CLOSE_AFTER = 2
+EXPERIENCE_FIRST_ROUND_MAX_STEPS = 5
+EXPERIENCE_PERSONA_WRAP_SECONDS = 8 * 60
+EXPERIENCE_PERSONA_SOFT_STOP_SECONDS = 10 * 60
 EXPERIENCE_PERSONA_TIMEOUT_SECONDS = 12 * 60
 STUDY_EVALUATION_PROTOCOL_VERSION = "blind-standardized-release-v1"
 STUDY_EVALUATOR_PROMPT_ID = "blind-artifact-regression-cuj-v1"
@@ -3255,18 +3258,33 @@ def is_experience_persona_role(role: str) -> bool:
 
 
 def experience_persona_timeout_seconds(state: dict[str, Any]) -> int:
-    """Bound one virtual-user Computer Use turn to at most 12 minutes."""
+    """Stop one virtual-user Computer Use turn at 10 minutes, hard-capped at 12."""
 
     timeout = agent_timeout_seconds(state)
     with contextlib.suppress(TypeError, ValueError):
         configured = int(
             os.environ.get(
                 "WF_EXPERIENCE_PERSONA_TIMEOUT",
-                str(EXPERIENCE_PERSONA_TIMEOUT_SECONDS),
+                str(EXPERIENCE_PERSONA_SOFT_STOP_SECONDS),
             )
         )
         return max(30, min(timeout, configured, EXPERIENCE_PERSONA_TIMEOUT_SECONDS))
-    return min(timeout, EXPERIENCE_PERSONA_TIMEOUT_SECONDS)
+    return min(timeout, EXPERIENCE_PERSONA_SOFT_STOP_SECONDS)
+
+
+def experience_persona_wrap_seconds(state: dict[str, Any]) -> int:
+    """Ask the virtual user to submit observed results after about 8 minutes."""
+
+    timeout = experience_persona_timeout_seconds(state)
+    with contextlib.suppress(TypeError, ValueError):
+        configured = int(
+            os.environ.get(
+                "WF_EXPERIENCE_PERSONA_WRAP",
+                str(EXPERIENCE_PERSONA_WRAP_SECONDS),
+            )
+        )
+        return max(30, min(timeout, configured))
+    return min(timeout, EXPERIENCE_PERSONA_WRAP_SECONDS)
 
 
 def treatment_experience_wave_size(_state: dict[str, Any] | None = None) -> int:
@@ -9317,6 +9335,170 @@ def unique_screenshot_paths(state: dict[str, Any], values: Any, *, limit: int = 
     return result
 
 
+def persona_artifact_screenshots(
+    state: dict[str, Any],
+    persona_id: str = "",
+    *,
+    artifact_dir: str | Path | None = None,
+    limit: int = 4,
+) -> list[str]:
+    """Recover Computer Use frames left on disk after a timeout or incomplete report."""
+
+    if limit <= 0:
+        return []
+
+    def collect(root: Path, *, recursive: bool) -> list[str]:
+        try:
+            resolved = root.resolve()
+        except OSError:
+            return []
+        if not resolved.is_dir():
+            return []
+        try:
+            files = [
+                path
+                for path in (resolved.rglob("*") if recursive else resolved.iterdir())
+                if path.is_file() and is_screenshot_file(path)
+            ]
+        except OSError:
+            return []
+        files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+        return unique_screenshot_paths(state, [str(path) for path in files], limit=limit)
+
+    if artifact_dir:
+        selected = collect(Path(str(artifact_dir)), recursive=True)
+        if selected:
+            return selected
+    persona_key = str(persona_id or "").strip()
+    if not persona_key:
+        return []
+    persona_root = run_dir(state["run_id"]) / "artifacts" / persona_key
+    if not persona_root.is_dir():
+        return []
+    try:
+        batch_dirs = [path for path in persona_root.iterdir() if path.is_dir()]
+    except OSError:
+        batch_dirs = []
+    batch_dirs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    for batch in batch_dirs[:3]:
+        selected = collect(batch, recursive=True)
+        if selected:
+            return selected
+    return collect(persona_root, recursive=True)
+
+
+def persist_streamed_computer_use_images(
+    state: dict[str, Any],
+    artifact_dir: str | Path | None,
+    stdout: Any,
+) -> list[str]:
+    """Write Computer Use frames from a partial CLI stream after timeout or interrupt."""
+
+    if artifact_dir is None or stdout in {None, ""}:
+        return []
+    raw = stdout
+    if isinstance(raw, (bytes, bytearray)):
+        raw = bytes(raw).decode("utf-8", errors="replace")
+    text = str(raw or "")
+    if not text.strip():
+        return []
+    try:
+        envelope = parse_claude_json(text)
+    except WorkflowError:
+        return []
+    root = Path(str(artifact_dir))
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return []
+    captured: list[str] = []
+    try:
+        existing = len([path for path in root.glob("computer-use-*") if path.is_file()])
+    except OSError:
+        existing = 0
+    for index, image in enumerate(envelope.get("_observed_images") or [], existing + 1):
+        if not isinstance(image, dict):
+            continue
+        suffix = ".jpg" if str(image.get("media_type") or "") == "image/jpeg" else ".png"
+        path = root / f"computer-use-{index}{suffix}"
+        try:
+            data = base64.b64decode(image.get("data") or "", validate=True)
+            if 0 < len(data) <= 12_000_000:
+                path.write_bytes(data)
+                captured.append(str(path))
+        except (ValueError, OSError):
+            continue
+    return unique_screenshot_paths(state, captured, limit=20)
+
+
+def recover_experience_turn_from_stream(
+    state: dict[str, Any],
+    stdout: Any,
+    *,
+    artifact_dir: str | Path | None = None,
+    persona_id: str = "",
+) -> dict[str, Any] | None:
+    """Keep a timed-out virtual-user turn when screenshots or structured output already exist."""
+
+    envelope: dict[str, Any] = {}
+    raw = stdout
+    if isinstance(raw, (bytes, bytearray)):
+        raw = bytes(raw).decode("utf-8", errors="replace")
+    text = str(raw or "")
+    if text.strip():
+        with contextlib.suppress(WorkflowError):
+            parsed = parse_claude_json(text)
+            if isinstance(parsed, dict):
+                envelope = parsed
+    structured = claude_structured_output_from_envelope(envelope)
+    shots = persona_artifact_screenshots(
+        state,
+        persona_id,
+        artifact_dir=artifact_dir,
+    )
+    if not isinstance(structured, dict) and not shots:
+        return None
+    if isinstance(structured, dict):
+        result = dict(structured)
+    else:
+        result = {
+            "persona_id": persona_id,
+            "computer_use_attempted": True,
+            "computer_use_succeeded": False,
+            "satisfied": False,
+            "issues": [
+                {
+                    "title": "试用中途收束",
+                    "severity": "medium",
+                    "description": "已根据当时页面提交已有观察",
+                    "steps": ["打开当前可运行页面并执行画像任务"],
+                    "expected": "完成核心动作并保存体验证据",
+                    "actual": "到达收束时限，提交已完成的观察",
+                    "screenshot": shots[0] if shots else "",
+                    "affected_guardrails": [],
+                    "change_scope": "usability_within_guardrail",
+                    "confidence": 0.7,
+                }
+            ],
+            "task_results": [],
+        }
+    result["computer_use_attempted"] = True
+    result["computer_use_incomplete"] = True
+    result["_recovered_from_timeout"] = True
+    if artifact_dir:
+        result["_artifact_dir"] = str(artifact_dir)
+    if shots:
+        existing = [str(item) for item in result.get("screenshots") or [] if str(item)]
+        result["screenshots"] = list(dict.fromkeys([*existing, *shots]))
+        issues = result.get("issues")
+        if isinstance(issues, list):
+            for issue in issues:
+                if isinstance(issue, dict) and not issue.get("screenshot"):
+                    issue["screenshot"] = shots[0]
+                    break
+    return result
+
+
 def experience_copy_attachments(state: dict[str, Any], result: dict[str, Any], *, limit: int = 4) -> list[str]:
     """Choose concise evidence: issue screenshots first, then one final-state image."""
     issue_shots = [
@@ -10199,13 +10381,76 @@ def workflow_cli_env(state: dict[str, Any]) -> dict[str, str]:
     return env
 
 
+def annotate_claude_envelope_observations(
+    envelope: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Attach tool, text, and image observations from streamed Claude events."""
+
+    tool_uses: list[str] = []
+    structured_outputs: list[dict[str, Any]] = []
+    text_outputs: list[str] = []
+    observed_images: list[dict[str, str]] = []
+    observed_session_ids: list[str] = []
+
+    def find_images(value: Any) -> None:
+        if len(observed_images) >= 4:
+            return
+        if isinstance(value, dict):
+            source = value.get("source") or {}
+            if (
+                value.get("type") == "image"
+                and isinstance(source, dict)
+                and source.get("type") == "base64"
+                and source.get("data")
+            ):
+                observed_images.append(
+                    {
+                        "media_type": str(source.get("media_type") or "image/png"),
+                        "data": str(source["data"]),
+                    }
+                )
+                return
+            for child in value.values():
+                find_images(child)
+        elif isinstance(value, list):
+            for child in value:
+                find_images(child)
+
+    for value in events:
+        if not isinstance(value, dict):
+            continue
+        sid = str(value.get("session_id") or "").strip()
+        if sid and sid not in observed_session_ids:
+            observed_session_ids.append(sid)
+        if value.get("type") == "assistant":
+            for block in (value.get("message") or {}).get("content") or []:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use":
+                    tool_uses.append(
+                        f"{block.get('name', '')} {json.dumps(block.get('input') or {}, ensure_ascii=False)[:1500]}"
+                    )
+                    if block.get("name") == "StructuredOutput" and isinstance(block.get("input"), dict):
+                        structured_outputs.append(dict(block["input"]))
+                elif block.get("type") == "text" and isinstance(block.get("text"), str):
+                    text_outputs.append(block["text"])
+        elif value.get("type") == "user":
+            find_images((value.get("message") or {}).get("content") or [])
+    annotated = dict(envelope)
+    annotated["_observed_tool_uses"] = tool_uses
+    annotated["_observed_structured_outputs"] = structured_outputs
+    annotated["_observed_text_outputs"] = text_outputs
+    annotated["_observed_images"] = observed_images
+    annotated["_observed_session_ids"] = observed_session_ids
+    return annotated
+
+
 def parse_claude_json(stdout: str) -> dict[str, Any]:
     with contextlib.suppress(json.JSONDecodeError):
         value = json.loads(stdout)
         if isinstance(value, dict):
-            sid = str(value.get("session_id") or "").strip()
-            value["_observed_session_ids"] = [sid] if sid else []
-            return value
+            return annotate_claude_envelope_observations(value, [value])
     final: dict[str, Any] | None = None
     tool_uses: list[str] = []
     structured_outputs: list[dict[str, Any]] = []
@@ -10942,6 +11187,17 @@ def call_claude_cli(
             save_state(state)
             proc = execute(base[:-2] + ["--session-id", session["id"]])
     except subprocess.TimeoutExpired as exc:
+        stdout = getattr(exc, "stdout", None) or getattr(exc, "output", None)
+        persist_streamed_computer_use_images(state, artifact_dir, stdout)
+        if is_experience_persona_role(role):
+            recovered = recover_experience_turn_from_stream(
+                state,
+                stdout,
+                artifact_dir=artifact_dir,
+                persona_id=role.split(":", 1)[-1] if ":" in role else "",
+            )
+            if recovered:
+                return recovered
         raise WorkflowError(
             f"{role} 超时（{agent_timeout_seconds_for_role(state, role)} 秒）"
         ) from exc
@@ -11878,6 +12134,15 @@ def call_codex_cli(
             schema_path.unlink()
         with contextlib.suppress(OSError):
             output_path.unlink()
+        if is_experience_persona_role(role):
+            recovered = recover_experience_turn_from_stream(
+                state,
+                getattr(exc, "stdout", None) or getattr(exc, "output", None),
+                artifact_dir=artifact_dir,
+                persona_id=role.split(":", 1)[-1] if ":" in role else "",
+            )
+            if recovered:
+                return recovered
         raise WorkflowError(
             f"Codex {role} 超时（{agent_timeout_seconds_for_role(state, role)} 秒）"
         ) from exc
@@ -12385,6 +12650,36 @@ def select_cuj_carrier_persona_id(cohort: list[dict[str, Any]]) -> str:
     return ""
 
 
+def bound_experience_core_script(
+    script: list[Any],
+    *,
+    limit: int = EXPERIENCE_FIRST_ROUND_MAX_STEPS,
+) -> list[dict[str, Any]]:
+    """Keep a first-round virtual-user script to 3–5 core actions."""
+
+    bounded: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_actions: set[str] = set()
+    for row in script:
+        if not isinstance(row, dict):
+            continue
+        action = str(row.get("action") or "").strip()
+        if not action:
+            continue
+        step_id = str(row.get("id") or "").strip()
+        if step_id and step_id in seen_ids:
+            continue
+        if action in seen_actions:
+            continue
+        bounded.append(dict(row))
+        if step_id:
+            seen_ids.add(step_id)
+        seen_actions.add(action)
+        if len(bounded) >= max(1, int(limit)):
+            break
+    return bounded
+
+
 def experience_persona_script(
     state: dict[str, Any],
     persona: dict[str, Any],
@@ -12396,6 +12691,7 @@ def experience_persona_script(
             row for row in script
             if str(row.get("id") or "") not in _INJECTED_AUTH_CUJ_STEP_IDS
         ]
+    script = bound_experience_core_script(script)
     carrier_id = select_cuj_carrier_persona_id(cohort)
     if str(persona.get("id") or "") != carrier_id:
         return script
@@ -24076,9 +24372,15 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         script: list[Any],
         *,
         reason: str = "interrupted",
+        artifact_dir: Path | None = None,
     ) -> dict[str, Any]:
         timed_out = reason == "timeout"
         limit_minutes = max(1, experience_persona_timeout_seconds(state) // 60)
+        shots = persona_artifact_screenshots(
+            state,
+            str(persona_row.get("id") or ""),
+            artifact_dir=artifact_dir,
+        )
         return {
             "persona_id": str(persona_row.get("id") or ""),
             "platform": str(persona_row.get("device") or "Web"),
@@ -24116,13 +24418,14 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
                         if timed_out
                         else "浏览器试用进程在返回结构化结果前中断"
                     ),
-                    "screenshot": "",
+                    "screenshot": shots[0] if shots else "",
                     "affected_guardrails": [],
                     "change_scope": "bug",
                     "confidence": 1.0,
                 }
             ],
-            "screenshots": [],
+            "screenshots": shots,
+            "_artifact_dir": str(artifact_dir) if artifact_dir else "",
             "blocker": "自动浏览器试用超时" if timed_out else "自动浏览器试用执行中断",
         }
 
@@ -24132,18 +24435,22 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         artifact_dir: Path,
     ) -> dict[str, Any]:
         ui_locale = prompt_ui_locale(state)
+        wrap_minutes = max(1, experience_persona_wrap_seconds(state) // 60)
+        stop_minutes = max(wrap_minutes, experience_persona_timeout_seconds(state) // 60)
         payload = {
             "task": public_bubble_language_instruction(ui_locale)
             + "严格按画像通过 UI 完成 task_script。你就是这个人：用这个人的设备、动机和场景去用应用，不要像测试员报步骤。"
             + (
-                "本轮只复测上轮你本人提到的问题，不要再做完整巡检。"
+                "本轮只复测上轮你本人提到的最多 3 个问题，不要再做完整巡检。"
                 if any(
                     isinstance(row, dict) and row.get("issues")
                     for row in previous
                     if isinstance(row, dict) and row.get("persona_id") == persona_row["id"]
                 )
-                else "按这个人平时会做的事试用核心功能。"
+                else "按这个人平时会做的事试用 task_script 里的 3 到 5 个核心动作，做完就停，不要继续逛无关页面。"
             )
+            + f"浏览大约 {wrap_minutes} 分钟后必须停手，立刻提交已有观察和 StructuredOutput；最迟 {stop_minutes} 分钟结束，不要为了凑完整流程继续点。"
+            + "任一页面加载超过 4 秒就记成卡住：最多截一张当时的画面，然后做下一步；同一页面不得反复等待、轮询或重复截图。"
             + "你是真实用户，只谈自己能不能办成这件事、卡在哪、点了什么却做不了；禁止写 localStorage、认证体系、账号系统、产品成熟度、架构或同步方案。"
             + "公开字段用第一人称场景化短句，例如「当我填身高的时候，下一步点不了」。issues 的 title/description/actual/expected 各不超过 40 字。"
             + experience_auth_cuj_prompt(state)
@@ -24285,10 +24592,10 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         else:
             first_name = "体验者"
             first_name_i18n = app_i18n.pair(first_name, first_name)
-        if need_tester and pending_runs:
+        if pending_runs and need_tester:
             current_summary = app_i18n.pair(
-                f"测试智能体与 {len(pending_runs)} 位虚拟用户正在同时体验应用",
-                f"The test agent and {len(pending_runs)} virtual users are trying the app at the same time",
+                f"{len(pending_runs)} 位虚拟用户将依次体验应用，随后测试智能体检查当前版本",
+                f"{len(pending_runs)} virtual users will try the app one after another, then the test agent will check this version",
             )
         elif need_tester:
             current_summary = app_i18n.pair(
@@ -24302,16 +24609,16 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
             )
         else:
             current_summary = app_i18n.pair(
-                f"{len(pending_runs)} 位虚拟用户正在同时体验应用",
-                f"{len(pending_runs)} virtual users are trying the app at the same time",
+                f"{len(pending_runs)} 位虚拟用户将依次体验应用",
+                f"{len(pending_runs)} virtual users will try the app one after another",
             )
         set_public_work_summary(
             state,
             kind="experiencing",
             current=current_summary,
             next_step=app_i18n.pair(
-                "体验副本和测试智能体检查结果会以冒泡出现在研发页；测试智能体和两名虚拟用户都完成后再交回研发智能体",
-                "Trial notes and the test-agent check appear as bubbles on Development. This round returns after the test agent and two virtual users finish",
+                "体验副本会先出现在研发页；两名虚拟用户依次试用后，测试智能体再检查并交回研发智能体",
+                "Trial notes appear on Development first. After two virtual users finish one after another, the test agent checks and returns to development",
             ),
         )
         state["internal_test_queue"] = test_queue
@@ -24343,6 +24650,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
                         persona_row,
                         script,
                         reason="timeout" if timed_out else "interrupted",
+                        artifact_dir=artifact_dir,
                     ),
                     exc,
                 )
@@ -24383,58 +24691,38 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
                 )
             save_state(state)
 
-        worker_count = max(1, len(pending_runs) + (1 if need_tester else 0))
-        with ThreadPoolExecutor(max_workers=worker_count) as pool:
-            tester_future = None
+        close_after = (
+            min(treatment_experience_wave_close_after(state), len(pending_runs))
+            if study_multi_agent_treatment_enabled(state) and pending_runs
+            else len(pending_runs)
+        )
+        finished_vu = 0
+        deferred_runs: list[tuple[int, dict[str, Any], list[Any]]] = []
+        try:
+            for item in pending_runs:
+                if finished_vu >= close_after:
+                    deferred_runs.append(item)
+                    continue
+                persona_row, script, raw_result, fail = run_one(item)
+                if fail is not None:
+                    event(
+                        state,
+                        "developmental_persona_failed_continuing",
+                        persona_id=str(persona_row.get("id") or ""),
+                        error_type=type(fail).__name__,
+                        error=str(fail)[-500:],
+                        timed_out="超时" in str(fail),
+                    )
+                publish_persona_result(persona_row, script, raw_result, tested_at=utcnow())
+                finished_vu += 1
             if need_tester:
                 tester_descriptor["tester_attempted"] = True
                 tester_descriptor["tester_started_at"] = utcnow()
                 save_state(state)
-                tester_future = pool.submit(run_tester_job)
-            future_map = {pool.submit(run_one, item): item for item in pending_runs}
-            close_after = (
-                min(treatment_experience_wave_close_after(state), len(pending_runs))
-                if study_multi_agent_treatment_enabled(state) and pending_runs
-                else len(pending_runs)
-            )
-            finished_vu = 0
-            deferred_runs: list[tuple[int, dict[str, Any], list[Any]]] = []
-            tracked = list(future_map)
-            if tester_future is not None:
-                tracked.append(tester_future)
-            try:
-                for fut in as_completed(tracked):
-                    if fut is tester_future:
-                        tester_result, tester_error = fut.result()
-                        publish_tester_outcome(tester_result, tester_error)
-                        continue
-                    persona_row, script, raw_result, fail = fut.result()
-                    if fail is not None:
-                        event(
-                            state,
-                            "developmental_persona_failed_continuing",
-                            persona_id=str(persona_row.get("id") or ""),
-                            error_type=type(fail).__name__,
-                            error=str(fail)[-500:],
-                            timed_out="超时" in str(fail),
-                        )
-                    publish_persona_result(persona_row, script, raw_result, tested_at=utcnow())
-                    finished_vu += 1
-                    if finished_vu >= close_after:
-                        for other, item in future_map.items():
-                            if other is not fut and not other.done():
-                                other.cancel()
-                                deferred_runs.append(item)
-                        break
-                if tester_future is not None and not tester_future.done():
-                    tester_result, tester_error = tester_future.result()
-                    publish_tester_outcome(tester_result, tester_error)
-            except WorkflowStopRequested:
-                for fut in future_map:
-                    fut.cancel()
-                if tester_future is not None:
-                    tester_future.cancel()
-                raise
+                tester_result, tester_error = run_tester_job()
+                publish_tester_outcome(tester_result, tester_error)
+        except WorkflowStopRequested:
+            raise
         if deferred_runs:
             deferred_ids = [
                 str(item[1].get("id") or "")

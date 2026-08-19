@@ -3381,6 +3381,7 @@
     serviceWorkerPromise: null,
     developerMessageBaselines: new Map(),
     lastMainConversationFingerprint: "",
+    lastPersonaRosterFingerprint: "",
     lastAppListFingerprint: "",
     tabReadState: readTabReadState(),
     developerSessionOpen: false,
@@ -5513,9 +5514,13 @@
     const fingerprint = mainConversationFingerprint();
     const messagesChanged = fingerprint !== state.lastMainConversationFingerprint;
     state.lastMainConversationFingerprint = fingerprint;
+    const rosterFingerprint = personaRosterFingerprint();
+    const personasChanged = rosterFingerprint !== state.lastPersonaRosterFingerprint;
+    state.lastPersonaRosterFingerprint = rosterFingerprint;
     if (shouldDeferBackgroundRender()) {
       if (fullRender || messagesChanged || !silent) state.deferredAppRender = true;
       renderHeader();
+      if (personasChanged) renderMembers();
       if (state.repositoryDialogOpen) renderRepositoryDialog();
       return;
     }
@@ -5524,7 +5529,18 @@
     } else {
       renderHeader();
     }
+    if (personasChanged) renderMembers();
     scheduleExperienceConversationSync();
+  }
+
+  function personaRosterFingerprint() {
+    const personas = arrayFrom(state.current?.personas);
+    const generating = isPersonaGenerationInProgress() ? "1" : "0";
+    const ids = personas.map((item) => [
+      firstText(item?.id, item?.persona_id, item?.personaId),
+      firstText(item?.name),
+    ].join(":")).join("|");
+    return `${generating}\u0001${ids}`;
   }
 
   function developmentCacheKey(id) {

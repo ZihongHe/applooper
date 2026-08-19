@@ -23966,6 +23966,26 @@ class WorkflowWebService:
         return []
 
     @staticmethod
+    def _experience_fallback_attachments(state: dict[str, Any], row: dict[str, Any]) -> list[str]:
+        actor = str(row.get("actor") or "").strip().casefold()
+        channel = str(row.get("channel") or "")
+        persona_match = re.fullmatch(r"experience:(.+)", channel, re.I)
+        if actor not in {"experience", "persona"} and persona_match is None:
+            return []
+        persona_id = str(row.get("persona_id") or (persona_match.group(1) if persona_match else "")).strip()
+        if not persona_id:
+            return []
+        for result in state.get("last_experience") or []:
+            if not isinstance(result, dict):
+                continue
+            if str(result.get("persona_id") or "") != persona_id:
+                continue
+            selected = workflow_agent.experience_copy_attachments(state, result)
+            if selected:
+                return selected
+        return workflow_agent.persona_artifact_screenshots(state, persona_id)
+
+    @staticmethod
     def _row_attachment_captions(state: dict[str, Any], row: dict[str, Any]) -> list[str]:
         captions = row.get("attachment_captions")
         if isinstance(captions, list):
@@ -24218,7 +24238,10 @@ class WorkflowWebService:
                     )
             else:
                 captions = self._row_attachment_captions(state, row)
-                for index, raw in enumerate(self._row_attachments(state, row)):
+                raw_attachments = list(self._row_attachments(state, row))
+                if not raw_attachments:
+                    raw_attachments = self._experience_fallback_attachments(state, row)
+                for index, raw in enumerate(raw_attachments):
                     path = self._safe_message_path(state, raw)
                     if path is None:
                         continue
@@ -24528,9 +24551,33 @@ class WorkflowWebService:
                 "fallback": {},
             },
             "personas": self._public_personas(state),
-            "messages": self._conversation_messages(state, channel="main")[-60:],
+            "messages": self._development_stream_messages(state),
             "partial": True,
         }
+
+    def _development_stream_messages(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+        """Keep the live R&D poll small, but include recent virtual-user bubbles."""
+
+        messages = self._conversation_messages(state)
+        main = [item for item in messages if str(item.get("channel") or "main") == "main"][-60:]
+        experience = [
+            item
+            for item in messages
+            if str(item.get("channel") or "").lower().startswith("experience:")
+        ][-24:]
+        seen = {id(item) for item in main}
+        merged = list(main)
+        for item in experience:
+            if id(item) in seen:
+                continue
+            merged.append(item)
+        merged.sort(
+            key=lambda item: (
+                self._time_key(item.get("at")),
+                str(item.get("id") or ""),
+            )
+        )
+        return merged
 
     def development_detail(self, run_id: str) -> dict[str, Any]:
         return self.development_detail_from_state(self.load_app_state(run_id))
