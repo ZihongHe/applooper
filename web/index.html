@@ -10,7 +10,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
-    <link rel="stylesheet" href="./styles.css?v=209" />
+    <link rel="stylesheet" href="./styles.css?v=210" />
     <title>AppLooper</title>
   </head>
   <body>
@@ -1265,6 +1265,21 @@
       </footer>
     </dialog>
 
+    <dialog class="modal initial-build-modal" id="initialBuildDialog" aria-labelledby="initialBuildTitle">
+      <form method="dialog">
+        <div class="modal-header">
+          <div>
+            <span class="eyebrow" data-i18n="initial_build.kicker">初版构建</span>
+            <h2 id="initialBuildTitle" data-i18n="initial_build.title">初版构建超时</h2>
+          </div>
+        </div>
+        <p id="initialBuildCopy" data-i18n="initial_build.copy">研发智能体还没有交出第一版。当前进度已保存，可以立即重试。</p>
+        <div class="modal-actions">
+          <button class="primary-button" id="initialBuildRetryButton" type="button" data-i18n="initial_build.retry">重试</button>
+        </div>
+      </form>
+    </dialog>
+
     <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
 
     <template id="appEmptyTemplate">
@@ -1274,8 +1289,8 @@
       </div>
     </template>
 
-    <script src="./i18n.js?v=209" defer></script>
-    <script src="./boot.js?v=209" defer></script>
-    <script id="appBundle" src="./app.js?v=209" defer></script>
+    <script src="./i18n.js?v=210" defer></script>
+    <script src="./boot.js?v=210" defer></script>
+    <script id="appBundle" src="./app.js?v=210" defer></script>
   </body>
 </html>

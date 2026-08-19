@@ -1,15 +1,15 @@
 "use strict";
 
-const CACHE_NAME = "applooper-web-v209";
+const CACHE_NAME = "applooper-web-v210";
 const NAVIGATION_TIMEOUT_MS = 30_000;
 const ASSET_TIMEOUT_MS = 0;
 const APP_SHELL_CORE = [
   "./",
   "./index.html",
-  "./styles.css?v=209",
-  "./boot.js?v=209",
-  "./i18n.js?v=209",
-  "./app.js?v=209",
+  "./styles.css?v=210",
+  "./boot.js?v=210",
+  "./i18n.js?v=210",
+  "./app.js?v=210",
   "./manifest.webmanifest",
 ];
 const APP_SHELL_OPTIONAL = [

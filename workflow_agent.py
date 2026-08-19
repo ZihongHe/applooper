@@ -4668,10 +4668,9 @@ def finalize_stagnant_verify_as_reviewable_prototype(state: dict[str, Any]) -> b
     """Stop looping when consecutive rounds only repeat last-loop verification."""
 
     if study_multi_agent_treatment_enabled(state):
-        if isinstance(state.get("pending_treatment_loop"), dict):
-            return False
-        if isinstance(state.get("developmental_experience"), dict):
-            return False
+        # Pending publish is earned when this wave's virtual users and test
+        # agent pass, or when the configured loop cap is reached.
+        return False
     reporting = progress_reporting_state(state)
     if int(reporting.get("stagnant_verify_rounds") or 0) < STAGNANT_VERIFY_FREEZE_ROUNDS:
         return False
@@ -27512,6 +27511,91 @@ def reconcile_completed_experience_feedback(state: dict[str, Any]) -> bool:
     return True
 
 
+def first_developer_delivery_complete(state: dict[str, Any]) -> bool:
+    """True after the developer agent has published a structured first build."""
+
+    last = state.get("last_developer") if isinstance(state.get("last_developer"), dict) else {}
+    if last.get("ready_for_review") is True:
+        return True
+    if str(last.get("summary") or "").strip():
+        return True
+    changes = last.get("changes")
+    if isinstance(changes, list) and any(str(item or "").strip() for item in changes):
+        return True
+    if str(last.get("experience_entry") or "").strip():
+        return True
+    handoff = state.get("agent_feedback_handoff")
+    if isinstance(handoff, dict) and str(handoff.get("message_id") or "").strip():
+        return True
+    handoffs = state.get("agent_feedback_handoffs")
+    if isinstance(handoffs, dict) and any(
+        isinstance(row, dict) and str(row.get("message_id") or "").strip()
+        for row in handoffs.values()
+    ):
+        return True
+    return False
+
+
+def initial_build_attention_state(state: dict[str, Any]) -> dict[str, Any] | None:
+    """Timeout card for a failed first developer build."""
+
+    if first_developer_delivery_complete(state):
+        return None
+    if str(state.get("phase") or "").upper() in {"DELIVERED", "STOPPED"}:
+        return None
+    last_error = str(state.get("last_error") or state.get("last_transient_error") or "")
+    status = str(state.get("status") or "")
+    retrying = status == "retrying_error" or bool(state.get("worker_retry_reason_code"))
+    failed = (
+        retrying
+        or bool(last_error)
+        or status in {"paused_error", "paused_safety", "failed", "error"}
+    )
+    if not failed:
+        return None
+    if str(state.get("initial_build_attention_acked_at") or "").strip():
+        return None
+    reason_code = str(
+        state.get("worker_retry_reason_code")
+        or worker_retry_reason_code(last_error, state)
+        or "timeout"
+    )[:80]
+    return {
+        "active": True,
+        "reason_code": reason_code,
+        "retryable": True,
+    }
+
+
+def mark_initial_build_retry_requested(state: dict[str, Any]) -> None:
+    """Hide the timeout card and wake a sleeping first-build retry."""
+
+    state["initial_build_attention_acked_at"] = utcnow()
+    state["worker_retry_after"] = 0
+    run_id = str(state.get("run_id") or "")
+    if not run_id:
+        return
+    path = run_dir(run_id) / "retry_now"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("1", encoding="utf-8")
+
+
+def consume_worker_retry_now(run_id: str) -> bool:
+    path = run_dir(str(run_id or "")) / "retry_now"
+    if not path.exists():
+        return False
+    with contextlib.suppress(OSError):
+        path.unlink()
+    return True
+
+
+def _mark_initial_build_attention(state: dict[str, Any]) -> None:
+    if first_developer_delivery_complete(state):
+        return
+    state.pop("initial_build_attention_acked_at", None)
+    state["initial_build_attention"] = True
+
+
 def prepare_worker_retry(state: dict[str, Any], error_text: str) -> tuple[int, bool]:
     """Record one failure and rotate a repeatedly failing developer session."""
 
@@ -27598,6 +27682,7 @@ def prepare_worker_retry(state: dict[str, Any], error_text: str) -> tuple[int, b
     if budget_exhausted:
         state["status"] = "retrying_error"
         state["last_error"] = error_text
+        _mark_initial_build_attention(state)
         set_public_work_summary(
             state,
             kind="retrying",
@@ -27616,6 +27701,7 @@ def prepare_worker_retry(state: dict[str, Any], error_text: str) -> tuple[int, b
         reason_code = str(state.get("worker_retry_reason_code") or "background_step_failed")
         state["status"] = "retrying_error"
         state["last_error"] = error_text
+        _mark_initial_build_attention(state)
         state["internal_recovery_diagnostic"] = {
             "reason_code": f"worker_retry_circuit:{reason_code}",
             "recoverable": True,
@@ -27646,6 +27732,7 @@ def prepare_worker_retry(state: dict[str, Any], error_text: str) -> tuple[int, b
     state["worker_retry_after"] = time.time() + delay
     state["status"] = "retrying_error"
     state["last_error"] = error_text
+    _mark_initial_build_attention(state)
     return delay, rotated
 
 
@@ -27681,6 +27768,7 @@ def begin_worker_retry_attempt(state: dict[str, Any]) -> None:
     """Clear stale UI timing without erasing the consecutive-failure history."""
 
     state.pop("worker_retry_after", None)
+    consume_worker_retry_now(str(state.get("run_id") or ""))
     if state.get("last_error"):
         state["last_transient_error"] = str(state.pop("last_error"))[:1_000]
     state["status"] = live_status(str(state.get("phase") or ""))
@@ -27701,6 +27789,7 @@ def wait_for_stop(
                 and worker_generation is not None
                 and newer_resume_handoff_pending(run_id, worker_generation)
             )
+            or (bool(run_id) and (run_dir(run_id) / "retry_now").exists())
         )
 
     deadline = time.time() + max(0, seconds)
@@ -28283,11 +28372,15 @@ def run_workflow(
                                 recover_study_preview_checkpoint(state)
                                 or usable_development_preview_checkpoint(state)
                             )
-                    if recovered_checkpoint and schedule_developmental_experience(
-                        state,
-                        mailer,
-                        trigger="developer_stall",
-                        developer_error=error_text,
+                    if (
+                        recovered_checkpoint
+                        and first_developer_delivery_complete(state)
+                        and schedule_developmental_experience(
+                            state,
+                            mailer,
+                            trigger="developer_stall",
+                            developer_error=error_text,
+                        )
                     ):
                         state["last_transient_error"] = error_text[:1_000]
                         event(

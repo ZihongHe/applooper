@@ -23848,6 +23848,9 @@ class WorkflowWebService:
             "capability_manifest": self.app_capability_manifest(state),
             "coding_provider": provider,
             "retry": retry,
+            "initial_build_attention": public_json(
+                workflow_agent.initial_build_attention_state(state)
+            ),
             "candidate_readiness": public_json(
                 workflow_agent.candidate_readiness_state(state)
             ),
@@ -25602,6 +25605,28 @@ class WorkflowWebService:
             self._resume_stop.set()
             raise
 
+    def retry_initial_build(self, run_id: str) -> dict[str, Any]:
+        """Wake a failed first developer build so the user can retry."""
+
+        self.load_app_state(run_id)
+        with self.run_lock(run_id):
+            state = self.load_app_state(run_id)
+            if workflow_agent.first_developer_delivery_complete(state):
+                return {"ok": True, "needed": False, "run_id": run_id}
+            workflow_agent.mark_initial_build_retry_requested(state)
+            workflow_agent.save_state(state)
+            identity = workflow_agent.effective_worker_identity(state)
+            if workflow_agent.process_alive(identity):
+                return {"ok": True, "needed": True, "run_id": run_id, "launch_required": False}
+            outcome = workflow_agent.queue_resume_request(run_id)
+            self._schedule_resume_launch(outcome)
+            return {
+                "ok": True,
+                "needed": True,
+                "run_id": run_id,
+                "launch_required": bool(outcome.get("launch_required")),
+            }
+
     def control(
         self,
         run_id: str,
@@ -27041,6 +27066,20 @@ class WorkflowRequestHandler(BaseHTTPRequestHandler):
                 locale=str(payload.get("locale") or "zh-CN"),
             )
             self._send_json(HTTPStatus.OK, result)
+            return
+        initial_build_retry = self._route(path, r"/initial-build-retry")
+        if initial_build_retry:
+            if not self.trusted_local:
+                raise APIError(
+                    HTTPStatus.FORBIDDEN,
+                    "local_only",
+                    "初版重试只能在本机使用",
+                )
+            self._read_optional_json()
+            self._send_json(
+                HTTPStatus.ACCEPTED,
+                self.service.retry_initial_build(initial_build_retry.group(1)),
+            )
             return
         control = self._route(path, r"/(stop|resume)")
         if control:
