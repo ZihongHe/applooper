@@ -10741,6 +10741,16 @@ body.repository-dialog-open {
   }
 }
 
+.initial-build-modal {
+  width: min(440px, calc(100vw - 32px));
+}
+
+.initial-build-modal p {
+  margin: 0 0 16px;
+  color: #4c5e75;
+  line-height: 1.55;
+}
+
 @keyframes ios-guide-sheet-in {
   from { opacity: 0; transform: translateY(24px); }
 }

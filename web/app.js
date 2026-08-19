@@ -23,7 +23,7 @@
   const OPERATIONS_SKILL_GENERATE_POLL_MS = 2_500;
   const OPERATIONS_SKILL_GENERATE_MAX_WAIT_MS = 600_000;
   const NOTIFICATION_PERMISSION_TIMEOUT_MS = 30_000;
-  const SERVICE_WORKER_VERSION = "209";
+  const SERVICE_WORKER_VERSION = "210";
   const REMOTE_TRIAL_SESSION_TIMEOUT_MS = 45_000;
   const RELEASE_VERIFY_MIN_OPERATIONS = 2;
   const RELEASE_VERIFY_MIN_DWELL_MS = 20_000;
@@ -576,8 +576,8 @@
       "release.confirm_done": "发布审查已完成，可以上线",
       "release.publish_community": "发布到研究测试社区",
       "release.publishing_community": "正在发布到研究测试社区…",
-      "release.community_published": "已发布到研究测试社区",
-      "release.community_publish_done": "应用已发布到研究测试社区，可供其他测试参与者体验",
+      "release.community_published": "已发布",
+      "release.community_publish_done": "应用已发布，可在发布页下载软件包",
       "release.item_guide": "试用",
       "release.owner_proxy_label": "所有者意图模拟智能体 · 非您本人",
       "release.owner_proxy_copy": "仅依据您明确确认的需求、约束和反馈进行只读复测；不推断未表达偏好，也不能确认发布。",
@@ -597,6 +597,12 @@
       "export.failed": "无法导出应用包，请稍后重试",
       "export.need_app": "请先选择一个应用",
       "export.copy": "下载当前应用的源码压缩包。导出内容不含密钥。",
+      "initial_build.kicker": "初版构建",
+      "initial_build.title": "初版构建超时",
+      "initial_build.copy": "研发智能体还没有交出第一版。当前进度已保存，可以立即重试。",
+      "initial_build.retry": "重试",
+      "initial_build.retrying": "正在重试…",
+      "initial_build.failed": "无法重试初版构建，请稍后再试",
       "internal.analysis_title": "独立内部测试分析智能体",
       "internal.simulated_evidence_label": "模拟证据 · 非真实用户/运营指标",
       "internal.analysis_copy": "独立于研发智能体，负责归并可复现问题；不能修改应用或决定发布，也不将浏览或点击次数解释为兴趣。",
@@ -2122,8 +2128,8 @@
       "release.confirm_done": "Release review complete — you may deploy",
       "release.publish_community": "Publish to the research test community",
       "release.publishing_community": "Publishing to the research test community…",
-      "release.community_published": "Published to the research test community",
-      "release.community_publish_done": "The app is available for other test participants to experience",
+      "release.community_published": "Published",
+      "release.community_publish_done": "The app is published. Download the package from the Publish tab.",
       "release.item_guide": "Try",
       "release.owner_proxy_label": "Owner-intent simulation agent · not you",
       "release.owner_proxy_copy": "This read-only re-check uses only requirements, constraints, and feedback you explicitly confirmed. It does not infer unstated preferences and cannot authorize release.",
@@ -2143,6 +2149,12 @@
       "export.failed": "Could not export the app package. Try again later.",
       "export.need_app": "Select an app first",
       "export.copy": "Download a source archive of the current app. Secrets are stripped.",
+      "initial_build.kicker": "First build",
+      "initial_build.title": "First build timed out",
+      "initial_build.copy": "The developer agent has not delivered the first version yet. Progress is saved and you can retry now.",
+      "initial_build.retry": "Retry",
+      "initial_build.retrying": "Retrying…",
+      "initial_build.failed": "Could not retry the first build. Try again later.",
       "internal.analysis_title": "Independent internal-test analysis agent",
       "internal.simulated_evidence_label": "Simulated evidence · not real-user or operational metrics",
       "internal.analysis_copy": "This agent is independent of the developer agent and consolidates reproducible findings. It cannot modify the app or decide release, and it does not interpret views or clicks as interest.",
@@ -3831,6 +3843,10 @@
       "launchTab",
       "launchUnread",
       "downloadSourceExportButton",
+      "initialBuildDialog",
+      "initialBuildTitle",
+      "initialBuildCopy",
+      "initialBuildRetryButton",
       "growthTab",
       "growthUnread",
       "experienceTwinPage",
@@ -4699,6 +4715,7 @@
     });
     dom.addExperienceSurfaceButton?.addEventListener("click", openExperienceSurfaceDialog);
     dom.downloadSourceExportButton?.addEventListener("click", () => void downloadSourceExport());
+    dom.initialBuildRetryButton?.addEventListener("click", () => void retryInitialBuild());
     dom.launchTab?.addEventListener("click", openLaunch);
     dom.growthTab?.addEventListener("click", openGrowth);
     dom.launchChecklistAction?.addEventListener("click", () => submitLaunchChecklistAction());
@@ -5522,6 +5539,7 @@
       renderHeader();
       if (personasChanged) renderMembers();
       if (state.repositoryDialogOpen) renderRepositoryDialog();
+      syncInitialBuildAttention();
       return;
     }
     if (fullRender || messagesChanged || !silent) {
@@ -5530,6 +5548,7 @@
       renderHeader();
     }
     if (personasChanged) renderMembers();
+    syncInitialBuildAttention();
     scheduleExperienceConversationSync();
   }
 
@@ -5737,6 +5756,7 @@
       ),
       codingProvider: data.coding_provider ?? app.coding_provider ?? previous?.codingProvider ?? null,
       retry: data.retry ?? app.retry ?? null,
+      initialBuildAttention: data.initial_build_attention ?? app.initial_build_attention ?? previous?.initialBuildAttention ?? null,
       codingAgentCliArgs: data.cli_args ?? app.cli_args ?? previous?.codingAgentCliArgs ?? { claude: "", codex: "" },
       codingAgentError,
       lastError: firstText(lastErrorSource),
@@ -7501,6 +7521,7 @@
             : "development";
       markTabRead(activeTab);
     }
+    syncInitialBuildAttention();
     if (patched) return;
     const renderedId = state.current.id;
     requestAnimationFrame(() => {
@@ -7509,6 +7530,50 @@
       renderMembers();
       renderAppList();
     });
+  }
+
+  function initialBuildAttentionActive(detail = state.current) {
+    const raw = detail?.initialBuildAttention || detail?.app?.initial_build_attention || null;
+    return Boolean(raw && typeof raw === "object" && raw.active);
+  }
+
+  function syncInitialBuildAttention() {
+    const dialog = dom.initialBuildDialog;
+    if (!dialog) return;
+    const active = Boolean(state.current && initialBuildAttentionActive(state.current));
+    if (active) {
+      if (typeof dialog.showModal === "function" && !dialog.open) dialog.showModal();
+      else dialog.removeAttribute("hidden");
+    } else if (dialog.open) {
+      dialog.close();
+    } else {
+      dialog.setAttribute("hidden", "");
+    }
+  }
+
+  async function retryInitialBuild() {
+    if (!state.currentId) return;
+    const button = dom.initialBuildRetryButton;
+    if (button) {
+      button.disabled = true;
+      button.textContent = t("initial_build.retrying");
+    }
+    try {
+      await request(`/apps/${encodeURIComponent(state.currentId)}/initial-build-retry`, {
+        method: "POST",
+        json: {},
+      });
+      if (state.current) state.current.initialBuildAttention = null;
+      syncInitialBuildAttention();
+      void loadDevelopmentApp({ silent: true });
+    } catch (error) {
+      showToast(friendlyError(error, t("initial_build.failed")), "error");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = t("initial_build.retry");
+      }
+    }
   }
 
   function renderHeader() {
