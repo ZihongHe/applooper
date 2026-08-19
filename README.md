@@ -2,8 +2,6 @@
 
 AppLooper is a localhost web agent that builds and iterates applications in a folder on your own machine. You choose a workspace (a new folder or an existing project). The sidebar lets you add as many apps as you want. Each app uses the AppLooper multi-agent workflow: developer, virtual user, test, and owner-intent.
 
-This package is for self-hosted use on `127.0.0.1` only. Put secrets only in `config.yaml` and do not commit filled keys.
-
 ## Prerequisites
 
 - Python 3.11 or newer
