@@ -99,6 +99,14 @@ STUDY_EVALUATOR_DEFAULT_MAX_ATTEMPTS = 2
 STUDY_SHARED_CUJ_MAX_STEPS = 8
 WORKER_RECOVERY_CIRCUIT_DEFAULT = 3
 WORKER_PROCESS_EXIT_CIRCUIT_DEFAULT = 3
+AGENT_EXECUTION_LOCK_WAIT_SECONDS = 7_200.0
+AGENT_EXECUTION_LOCK_LEASE_GRACE_SECONDS = 180.0
+AGENT_EXECUTION_LOCK_HEARTBEAT_INTERVAL_SECONDS = 10.0
+AGENT_EXECUTION_LOCK_HEARTBEAT_STALE_SECONDS = 45.0
+AGENT_EXECUTION_LOCK_MISSING_LEASE_STALE_SECONDS = 60.0
+AGENT_EXECUTION_LOCK_PREEMPT_GRACE_SECONDS = 25.0
+AGENT_EXECUTION_LOCK_CONTENTION_RETRY_SECONDS = 5
+WORKSPACE_LOCK_TIMEOUT_MESSAGE = "等待其他智能体释放候选工作区时超时"
 # v3: release evaluation runs once after each develop loop with only
 # releasable / not-releasable outcomes. A not-releasable verdict returns to
 # DEVELOP; there is no frozen per-candidate attempt budget.
@@ -696,8 +704,14 @@ def run_coding_process(
     timeout: int,
     env: dict[str, str],
     on_stdout_line: Any = None,
+    should_abort: Any = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a coding CLI and retain partial output when a timed-out tree is killed."""
+    """Run a coding CLI and retain partial output when a timed-out tree is killed.
+
+    Never drain pipes without a timeout after kill. An unbounded
+    ``communicate()`` can hold ``AgentExecutionLock`` for hours and freeze
+    every other role that needs the candidate tree.
+    """
     proc = subprocess.Popen(
         command,
         cwd=cwd,
@@ -710,14 +724,17 @@ def run_coding_process(
         env=env,
         **hidden_process_kwargs(),
     )
-    if callable(on_stdout_line):
-        stdout_chunks: list[str] = []
-        stderr_chunks: list[str] = []
-        callback_errors: list[BaseException] = []
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    callback_errors: list[BaseException] = []
 
-        def read_stdout() -> None:
-            if not proc.stdout:
-                return
+    def aborting() -> bool:
+        return bool(callable(should_abort) and should_abort())
+
+    def read_stdout() -> None:
+        if not proc.stdout:
+            return
+        if callable(on_stdout_line):
             for line in proc.stdout:
                 stdout_chunks.append(line)
                 if callback_errors:
@@ -726,71 +743,69 @@ def run_coding_process(
                     on_stdout_line(line)
                 except BaseException as exc:  # keep draining both process pipes
                     callback_errors.append(exc)
+            return
+        stdout_chunks.append(proc.stdout.read() or "")
 
-        def read_stderr() -> None:
-            if not proc.stderr:
-                return
-            stderr_chunks.extend(proc.stderr)
+    def read_stderr() -> None:
+        if not proc.stderr:
+            return
+        stderr_chunks.append(proc.stderr.read() or "")
 
-        stdout_thread = threading.Thread(target=read_stdout, daemon=True)
-        stderr_thread = threading.Thread(target=read_stderr, daemon=True)
-        stdout_thread.start()
-        stderr_thread.start()
-        try:
-            if proc.stdin:
-                proc.stdin.write(input_text)
-                proc.stdin.close()
-            proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired as exc:
-            terminate_process_tree(proc)
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.wait(timeout=5)
-            stdout_thread.join(timeout=2)
-            stderr_thread.join(timeout=2)
-            raise subprocess.TimeoutExpired(
-                command,
-                timeout,
-                output="".join(stdout_chunks),
-                stderr="".join(stderr_chunks),
-            ) from exc
-        except BaseException:
-            terminate_process_tree(proc)
-            raise
-        finally:
-            stdout_thread.join(timeout=2)
-            stderr_thread.join(timeout=2)
-            for stream in (proc.stdin, proc.stdout, proc.stderr):
-                if stream:
-                    with contextlib.suppress(OSError):
-                        stream.close()
-        if callback_errors:
-            raise callback_errors[0]
-        return subprocess.CompletedProcess(
-            command,
-            proc.returncode if proc.returncode is not None else 1,
-            "".join(stdout_chunks),
-            "".join(stderr_chunks),
-        )
+    def reap_bounded() -> None:
+        terminate_process_tree(proc)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=5)
+        stdout_thread.join(timeout=2)
+        stderr_thread.join(timeout=2)
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            if stream:
+                with contextlib.suppress(OSError):
+                    stream.close()
+
+    stdout_thread = threading.Thread(target=read_stdout, daemon=True)
+    stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
     try:
-        stdout, stderr = proc.communicate(input_text, timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        terminate_process_tree(proc)
-        try:
-            final_stdout, final_stderr = proc.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(OSError):
-                proc.kill()
-            final_stdout, final_stderr = proc.communicate()
-        raise subprocess.TimeoutExpired(
-            command,
-            timeout,
-            output=combine_process_output(exc.stdout, final_stdout),
-            stderr=combine_process_output(exc.stderr, final_stderr),
-        ) from exc
-    except BaseException:
-        terminate_process_tree(proc)
+        if proc.stdin:
+            proc.stdin.write(input_text)
+            proc.stdin.close()
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            if aborting() or time.monotonic() >= deadline:
+                reap_bounded()
+                raise subprocess.TimeoutExpired(
+                    command,
+                    timeout,
+                    output="".join(stdout_chunks),
+                    stderr="".join(stderr_chunks),
+                )
+            remaining = deadline - time.monotonic()
+            try:
+                proc.wait(timeout=min(1.0, remaining))
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    except subprocess.TimeoutExpired:
         raise
-    return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+    except BaseException:
+        reap_bounded()
+        raise
+    finally:
+        stdout_thread.join(timeout=2)
+        stderr_thread.join(timeout=2)
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            if stream:
+                with contextlib.suppress(OSError):
+                    stream.close()
+    if callback_errors:
+        raise callback_errors[0]
+    return subprocess.CompletedProcess(
+        command,
+        proc.returncode if proc.returncode is not None else 1,
+        "".join(stdout_chunks),
+        "".join(stderr_chunks),
+    )
 
 
 EXPERIENCE_TWIN_PREVIEW_PERFORMANCE_POLICY = (
@@ -1636,6 +1651,10 @@ class WorkflowError(RuntimeError):
 
 class WorkflowStopRequested(WorkflowError):
     """Raised when an active coding-agent call observes the run stop marker."""
+
+
+class WorkspaceLockTimeout(WorkflowError):
+    """A candidate-tree lock wait ended because the holder is stale or unresponsive."""
 
 
 class FatalWorkflowError(WorkflowError):
@@ -5983,6 +6002,7 @@ def save_state(state: dict[str, Any]) -> None:
         payload.pop("_worker_launch_generation", None)
         payload.pop("_worker_launch_id", None)
         payload.pop("_worker_spawn_attempt_id", None)
+        payload.pop("_agent_execution_should_abort", None)
         compact_session_execution_state(payload)
         payload["updated_at"] = utcnow()
         atomic_json(path, payload)
@@ -6500,6 +6520,146 @@ class WorkerLaunchLock:
         self.fp.close()
 
 
+def _env_positive_float(
+    name: str,
+    default: float,
+    *,
+    lo: float = 0.05,
+    hi: float = 86_400.0,
+) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return float(default)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+    return max(lo, min(hi, value))
+
+
+def os_pid_exists(pid: int) -> bool:
+    """Return whether an OS pid still exists, without worker-identity checks."""
+
+    if int(pid or 0) <= 0:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(int(pid), 0)
+        except OSError:
+            return False
+        return True
+    try:
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return bool(ok and code.value == 259)
+    except Exception:
+        return False
+
+
+def terminate_os_pid(pid: int) -> None:
+    """Best-effort stop of a lock holder that ignored preempt."""
+
+    target = int(pid or 0)
+    if target <= 1 or target == os.getpid():
+        return
+    if os.name != "nt":
+        with contextlib.suppress(OSError):
+            os.kill(target, signal.SIGTERM)
+        return
+    try:
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x0001, False, target)
+        if not handle:
+            return
+        try:
+            ctypes.windll.kernel32.TerminateProcess(handle, 1)
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    except Exception:
+        return
+
+
+def linux_file_lock_holder_pids(path: Path) -> set[int]:
+    """Return pids holding a Linux flock/posix lock on ``path``."""
+
+    if os.name == "nt":
+        return set()
+    try:
+        stat = path.stat()
+    except OSError:
+        return set()
+    try:
+        rows = Path("/proc/locks").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return set()
+    holders: set[int] = set()
+    expected = f"{stat.st_dev:02x}:{stat.st_ino}"
+    compact_dev = f"{os.major(stat.st_dev):02x}:{os.minor(stat.st_dev):02x}:{stat.st_ino}"
+    # /proc/locks uses "major:minor:inode" in hex, e.g. 00:1f:12345
+    proc_dev = f"{os.major(stat.st_dev):02x}:{os.minor(stat.st_dev):02x}"
+    for row in rows:
+        parts = row.split()
+        if len(parts) < 6:
+            continue
+        try:
+            holder = int(parts[4])
+            dev_inode = parts[5]
+        except (TypeError, ValueError, IndexError):
+            continue
+        prefix, sep, inode_text = dev_inode.rpartition(":")
+        if not sep:
+            continue
+        try:
+            inode = int(inode_text, 10)
+        except ValueError:
+            try:
+                inode = int(inode_text, 16)
+            except ValueError:
+                continue
+        if inode != stat.st_ino:
+            continue
+        if prefix.casefold() in {proc_dev.casefold(), expected.casefold(), compact_dev.casefold()}:
+            if holder > 1:
+                holders.add(holder)
+            continue
+        # Some kernels print the packed st_dev instead of major:minor.
+        if prefix.casefold() == f"{stat.st_dev:x}":
+            if holder > 1:
+                holders.add(holder)
+    return holders
+
+
+_AGENT_EXECUTION_ABORT_BY_STATE_ID: dict[int, Any] = {}
+
+
+def agent_execution_should_abort(state: Mapping[str, Any] | None) -> bool:
+    if not isinstance(state, Mapping):
+        return False
+    checker = _AGENT_EXECUTION_ABORT_BY_STATE_ID.get(id(state))
+    return bool(callable(checker) and checker())
+
+
+def bind_agent_execution_abort(state: Mapping[str, Any], checker: Any) -> Any:
+    previous = _AGENT_EXECUTION_ABORT_BY_STATE_ID.get(id(state))
+    _AGENT_EXECUTION_ABORT_BY_STATE_ID[id(state)] = checker
+    return previous
+
+
+def unbind_agent_execution_abort(state: Mapping[str, Any], previous: Any = None) -> None:
+    key = id(state)
+    if previous is None:
+        _AGENT_EXECUTION_ABORT_BY_STATE_ID.pop(key, None)
+        return
+    _AGENT_EXECUTION_ABORT_BY_STATE_ID[key] = previous
+
+
 class AgentExecutionLock:
     """Serialize coding-agent turns that observe or mutate one candidate tree.
 
@@ -6511,45 +6671,259 @@ class AgentExecutionLock:
 
     Named virtual-user ``experience:`` roles only lock their own session. They
     are read-only against the candidate tree and may run at the same time.
+
+    The lock is leased. A live holder heartbeats; a waiter never sits on a
+    blind 2-hour timer after the holder has died, stopped heartbeating, or
+    exceeded its role budget. Stale holders are preempted and, if they ignore
+    that, stopped so the next role can recover.
     """
 
-    def __init__(self, run_id: str, timeout: float = 7_200.0, role: str = ""):
-        if str(role or "").startswith("experience:"):
-            safe = re.sub(r"[^A-Za-z0-9._-]+", "-", str(role))[:96].strip("-") or "experience"
-            self.path = run_dir(run_id) / f"agent-execution-{safe}.lock"
+    def __init__(
+        self,
+        run_id: str,
+        timeout: float | None = None,
+        role: str = "",
+        *,
+        lease_seconds: float | None = None,
+        heartbeat_stale_seconds: float | None = None,
+        missing_lease_stale_seconds: float | None = None,
+        preempt_grace_seconds: float | None = None,
+    ):
+        self.run_id = str(run_id or "")
+        self.role = str(role or "")
+        if self.role.startswith("experience:"):
+            safe = re.sub(r"[^A-Za-z0-9._-]+", "-", self.role)[:96].strip("-") or "experience"
+            self.path = run_dir(self.run_id) / f"agent-execution-{safe}.lock"
         else:
-            self.path = run_dir(run_id) / "agent-execution.lock"
-        self.timeout = max(1.0, float(timeout))
+            self.path = run_dir(self.run_id) / "agent-execution.lock"
+        self.timeout = max(
+            1.0,
+            float(
+                timeout
+                if timeout is not None
+                else _env_positive_float(
+                    "WF_AGENT_EXECUTION_LOCK_TIMEOUT",
+                    AGENT_EXECUTION_LOCK_WAIT_SECONDS,
+                )
+            ),
+        )
+        self.lease_seconds = max(
+            5.0,
+            float(
+                lease_seconds
+                if lease_seconds is not None
+                else _env_positive_float(
+                    "WF_AGENT_EXECUTION_LOCK_LEASE",
+                    3_600.0 + AGENT_EXECUTION_LOCK_LEASE_GRACE_SECONDS,
+                )
+            ),
+        )
+        self.heartbeat_stale_seconds = max(
+            0.05,
+            float(
+                heartbeat_stale_seconds
+                if heartbeat_stale_seconds is not None
+                else _env_positive_float(
+                    "WF_AGENT_EXECUTION_LOCK_HEARTBEAT_STALE",
+                    AGENT_EXECUTION_LOCK_HEARTBEAT_STALE_SECONDS,
+                )
+            ),
+        )
+        self.missing_lease_stale_seconds = max(
+            0.05,
+            float(
+                missing_lease_stale_seconds
+                if missing_lease_stale_seconds is not None
+                else _env_positive_float(
+                    "WF_AGENT_EXECUTION_LOCK_MISSING_LEASE_STALE",
+                    AGENT_EXECUTION_LOCK_MISSING_LEASE_STALE_SECONDS,
+                )
+            ),
+        )
+        self.preempt_grace_seconds = max(
+            0.05,
+            float(
+                preempt_grace_seconds
+                if preempt_grace_seconds is not None
+                else _env_positive_float(
+                    "WF_AGENT_EXECUTION_LOCK_PREEMPT_GRACE",
+                    AGENT_EXECUTION_LOCK_PREEMPT_GRACE_SECONDS,
+                )
+            ),
+        )
         self.fp: Any = None
+        self.token = uuid.uuid4().hex
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
+        self._lease_acquired_at = 0.0
 
-    def __enter__(self) -> "AgentExecutionLock":
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.fp = self.path.open("a+b")
-        if os.fstat(self.fp.fileno()).st_size == 0:
-            self.fp.seek(0)
-            self.fp.write(b"0")
-            self.fp.flush()
-        deadline = time.monotonic() + self.timeout
-        while True:
-            self.fp.seek(0)
-            try:
-                if os.name == "nt":
-                    import msvcrt
+    def lease_path(self) -> Path:
+        return self.path.with_name(self.path.name + ".lease")
 
-                    msvcrt.locking(self.fp.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
+    def preempt_path(self) -> Path:
+        return self.path.with_name(self.path.name + ".preempt")
 
-                    fcntl.flock(self.fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return self
-            except OSError as exc:
-                if time.monotonic() >= deadline:
-                    self.fp.close()
-                    self.fp = None
-                    raise WorkflowError("等待其他智能体释放候选工作区时超时") from exc
-                time.sleep(0.1)
+    def should_abort(self) -> bool:
+        if self._held_beyond_lease():
+            return True
+        payload = self._read_json(self.preempt_path())
+        if not payload:
+            return False
+        target_token = str(payload.get("target_token") or "")
+        target_pid = int(payload.get("target_pid") or 0)
+        if target_token and target_token == self.token:
+            return True
+        return bool(target_pid and target_pid == os.getpid())
 
-    def __exit__(self, *_: Any) -> None:
+    def _held_beyond_lease(self) -> bool:
+        if not self._lease_acquired_at:
+            return False
+        return (time.time() - self._lease_acquired_at) > self.lease_seconds
+
+    def _read_json(self, path: Path) -> dict[str, Any]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
+        with contextlib.suppress(Exception):
+            atomic_json(path, payload)
+
+    def _clear_sidecar(self, path: Path) -> None:
+        with contextlib.suppress(OSError):
+            path.unlink()
+
+    def _read_lease(self) -> dict[str, Any]:
+        return self._read_json(self.lease_path())
+
+    def _write_lease(self, *, heartbeat_only: bool = False) -> None:
+        now = time.time()
+        current = self._read_lease() if heartbeat_only else {}
+        acquired_at = float(current.get("acquired_at") or 0) if heartbeat_only else now
+        if not heartbeat_only:
+            self._lease_acquired_at = now
+        elif not self._lease_acquired_at:
+            self._lease_acquired_at = acquired_at or now
+        self._write_json(
+            self.lease_path(),
+            {
+                "pid": os.getpid(),
+                "role": self.role,
+                "run_id": self.run_id,
+                "token": self.token,
+                "acquired_at": acquired_at or now,
+                "heartbeat_at": now,
+                "max_hold_seconds": self.lease_seconds,
+            },
+        )
+
+    def _start_heartbeat(self) -> None:
+        self._heartbeat_stop.clear()
+
+        def loop() -> None:
+            while not self._heartbeat_stop.wait(AGENT_EXECUTION_LOCK_HEARTBEAT_INTERVAL_SECONDS):
+                with contextlib.suppress(Exception):
+                    self._write_lease(heartbeat_only=True)
+
+        self._heartbeat_thread = threading.Thread(
+            target=loop,
+            name=f"agent-lock-hb-{self.run_id[:12]}",
+            daemon=True,
+        )
+        self._heartbeat_thread.start()
+
+    def _stop_heartbeat(self) -> None:
+        self._heartbeat_stop.set()
+        thread = self._heartbeat_thread
+        self._heartbeat_thread = None
+        if thread and thread.is_alive():
+            thread.join(timeout=1)
+
+    def _trace(self, kind: str, **data: Any) -> None:
+        path = self.path.with_name(self.path.name + ".jsonl")
+        row = {"at": utcnow(), "kind": kind, "pid": os.getpid(), "role": self.role, **data}
+        with contextlib.suppress(Exception):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    def _lease_unhealthy(self, lease: dict[str, Any], waited: float) -> bool:
+        if not lease:
+            return waited >= self.missing_lease_stale_seconds
+        heartbeat_at = float(lease.get("heartbeat_at") or lease.get("acquired_at") or 0)
+        acquired_at = float(lease.get("acquired_at") or 0)
+        max_hold = float(lease.get("max_hold_seconds") or self.lease_seconds)
+        now = time.time()
+        holder_pid = int(lease.get("pid") or 0)
+        if holder_pid and not os_pid_exists(holder_pid):
+            return True
+        if heartbeat_at and (now - heartbeat_at) >= self.heartbeat_stale_seconds:
+            return True
+        if acquired_at and max_hold and (now - acquired_at) >= max_hold:
+            return True
+        return False
+
+    def _holder_pids(self, lease: dict[str, Any]) -> set[int]:
+        pids: set[int] = set()
+        holder = int(lease.get("pid") or 0)
+        if holder > 1 and holder != os.getpid():
+            pids.add(holder)
+        pids.update(linux_file_lock_holder_pids(self.path) - {os.getpid()})
+        return {pid for pid in pids if pid > 1}
+
+    def _request_preempt(self, lease: dict[str, Any], reason: str) -> None:
+        payload = {
+            "target_pid": int(lease.get("pid") or 0),
+            "target_token": str(lease.get("token") or ""),
+            "reason": reason,
+            "requested_at": time.time(),
+            "requested_by": os.getpid(),
+        }
+        current = self._read_json(self.preempt_path())
+        same_target = (
+            current.get("target_pid") == payload["target_pid"]
+            and current.get("target_token") == payload["target_token"]
+        )
+        if not same_target:
+            self._write_json(self.preempt_path(), payload)
+            self._trace(
+                "workspace_lock_preempt_requested",
+                preempt_reason=reason,
+                target_pid=payload["target_pid"],
+                target_token=payload["target_token"],
+            )
+
+    def _enforce_preempt(self, lease: dict[str, Any]) -> None:
+        for pid in self._holder_pids(lease):
+            terminate_os_pid(pid)
+            self._trace("workspace_lock_holder_stopped", holder_pid=pid)
+
+    def _fail_wait(self, exc: OSError | None, waited: float, lease: dict[str, Any]) -> None:
+        if self.fp:
+            self.fp.close()
+            self.fp = None
+        self._trace("workspace_lock_wait_timeout", waited=round(waited, 2), lease=lease)
+        if exc is None:
+            raise WorkspaceLockTimeout(WORKSPACE_LOCK_TIMEOUT_MESSAGE)
+        raise WorkspaceLockTimeout(WORKSPACE_LOCK_TIMEOUT_MESSAGE) from exc
+
+    def _try_acquire(self) -> bool:
+        if not self.fp:
+            return False
+        self.fp.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(self.fp.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(self.fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+
+    def _release_flock(self) -> None:
         if not self.fp:
             return
         with contextlib.suppress(OSError):
@@ -6562,7 +6936,62 @@ class AgentExecutionLock:
                 import fcntl
 
                 fcntl.flock(self.fp.fileno(), fcntl.LOCK_UN)
-        self.fp.close()
+
+    def __enter__(self) -> "AgentExecutionLock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.fp = self.path.open("a+b")
+        if os.fstat(self.fp.fileno()).st_size == 0:
+            self.fp.seek(0)
+            self.fp.write(b"0")
+            self.fp.flush()
+        deadline = time.monotonic() + self.timeout
+        wait_started = time.monotonic()
+        preempt_requested_at: float | None = None
+        kill_attempted_at: float | None = None
+        last_exc: OSError | None = None
+        while True:
+            try:
+                self._try_acquire()
+                self._clear_sidecar(self.preempt_path())
+                self._write_lease()
+                self._start_heartbeat()
+                return self
+            except OSError as exc:
+                last_exc = exc
+                now = time.monotonic()
+                waited = now - wait_started
+                lease = self._read_lease()
+                unhealthy = self._lease_unhealthy(lease, waited)
+                if now >= deadline:
+                    self._fail_wait(last_exc, waited, lease)
+                if unhealthy:
+                    self._request_preempt(lease, "stale_or_expired_holder")
+                    if preempt_requested_at is None:
+                        preempt_requested_at = now
+                    if (
+                        kill_attempted_at is None
+                        and now - preempt_requested_at >= self.preempt_grace_seconds
+                    ):
+                        self._enforce_preempt(lease)
+                        kill_attempted_at = now
+                    if (
+                        kill_attempted_at is not None
+                        and now - kill_attempted_at >= self.preempt_grace_seconds
+                    ):
+                        self._fail_wait(last_exc, waited, lease)
+                time.sleep(0.1 if not unhealthy else 0.2)
+
+    def __exit__(self, *_: Any) -> None:
+        self._stop_heartbeat()
+        if self._read_lease().get("token") == self.token:
+            self._clear_sidecar(self.lease_path())
+        preempt = self._read_json(self.preempt_path())
+        if str(preempt.get("target_token") or "") == self.token:
+            self._clear_sidecar(self.preempt_path())
+        self._release_flock()
+        if self.fp:
+            self.fp.close()
+            self.fp = None
 
 
 def runtime_install_registry_dir() -> Path:
@@ -10756,6 +11185,10 @@ def run_claude_cli_streaming(
                 with contextlib.suppress(Exception):
                     terminate_process_tree(proc, isolated_session=True)
                 return
+            if agent_execution_should_abort(state):
+                with contextlib.suppress(Exception):
+                    terminate_process_tree(proc, isolated_session=True)
+                return
 
     stdin_thread = threading.Thread(target=write_stdin, daemon=True)
     stdout_thread = threading.Thread(target=read_stdout, daemon=True)
@@ -10779,6 +11212,8 @@ def run_claude_cli_streaming(
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            if agent_execution_should_abort(state):
                 raise subprocess.TimeoutExpired(command, timeout)
             try:
                 raw = stdout_queue.get(timeout=min(0.1, remaining))
@@ -12080,6 +12515,7 @@ def call_codex_cli(
                 timeout=role_timeout,
                 env=android_env(),
                 on_stdout_line=capture_line,
+                should_abort=lambda: agent_execution_should_abort(state),
             )
         finally:
             live = session.get("live_execution")
@@ -12375,36 +12811,49 @@ def call_claude(
         and state["_namespace_state_writer"].get("session_roles")
     ):
         state["_namespace_state_writer"] = {"session_roles": [role]}
-    with AgentExecutionLock(run_id, role=role):
-        namespace_writer = (
-            state.get("_namespace_state_writer")
-            if isinstance(state.get("_namespace_state_writer"), dict)
-            else {}
+    lease_seconds = (
+        float(agent_timeout_seconds_for_role(state, role))
+        + _env_positive_float(
+            "WF_AGENT_EXECUTION_LOCK_LEASE_GRACE",
+            AGENT_EXECUTION_LOCK_LEASE_GRACE_SECONDS,
         )
-        if namespace_writer and state_path(run_id).is_file():
-            # The Web helper may have waited behind a workflow agent turn. Its
-            # pre-lock snapshot and role session are stale at that point, so
-            # refresh before selecting provider/session or making any internal
-            # save. AgentExecutionLock now protects this role for the turn.
-            latest = load_state(run_id)
-            latest["_namespace_state_writer"] = namespace_writer
-            state.clear()
-            state.update(latest)
-        session = session_for(state, role)
-        provider = str(
-            session.get("provider") or state.get("coding_agent") or "claude"
-        )
-        caller = call_codex_cli if provider == "codex" else call_claude_cli
-        result = caller(
-            state,
-            role,
-            prompt,
-            schema,
-            chrome=chrome,
-            writable=writable,
-            artifact_dir=artifact_dir,
-            allowed_tools=allowed_tools,
-        )
+    )
+    previous_abort = _AGENT_EXECUTION_ABORT_BY_STATE_ID.get(id(state))
+    with AgentExecutionLock(run_id, role=role, lease_seconds=lease_seconds) as execution_lock:
+        bind_agent_execution_abort(state, execution_lock.should_abort)
+        try:
+            namespace_writer = (
+                state.get("_namespace_state_writer")
+                if isinstance(state.get("_namespace_state_writer"), dict)
+                else {}
+            )
+            if namespace_writer and state_path(run_id).is_file():
+                # The Web helper may have waited behind a workflow agent turn. Its
+                # pre-lock snapshot and role session are stale at that point, so
+                # refresh before selecting provider/session or making any internal
+                # save. AgentExecutionLock now protects this role for the turn.
+                latest = load_state(run_id)
+                latest["_namespace_state_writer"] = namespace_writer
+                state.clear()
+                state.update(latest)
+                bind_agent_execution_abort(state, execution_lock.should_abort)
+            session = session_for(state, role)
+            provider = str(
+                session.get("provider") or state.get("coding_agent") or "claude"
+            )
+            caller = call_codex_cli if provider == "codex" else call_claude_cli
+            result = caller(
+                state,
+                role,
+                prompt,
+                schema,
+                chrome=chrome,
+                writable=writable,
+                artifact_dir=artifact_dir,
+                allowed_tools=allowed_tools,
+            )
+        finally:
+            unbind_agent_execution_abort(state, previous_abort)
     if role.startswith("experience:"):
         result["screenshots"] = unique_screenshot_paths(state, result.get("screenshots") or [], limit=20)
     return result
@@ -27339,6 +27788,15 @@ def public_worker_retry_reason(error: str, state: dict[str, Any] | None = None) 
         return "研发服务当前请求较多"
     if "command line too long" in normalized or "命令行太长" in normalized:
         return "Claude Code 启动参数过长"
+    if any(
+        marker in normalized
+        for marker in (
+            "释放候选工作区",
+            "workspace lock",
+            "workspace_lock",
+        )
+    ):
+        return "其他智能体正在占用工作区，系统将自动重试"
     if "timeout" in normalized or "超时" in normalized:
         return "研发服务本次响应超时"
     if any(
@@ -27386,6 +27844,8 @@ def worker_retry_reason_code(error: str, state: dict[str, Any] | None = None) ->
         return "rate_limited"
     if "启动参数过长" in reason:
         return "command_line_too_long"
+    if "占用工作区" in reason:
+        return "workspace_lock_contention"
     if "超时" in reason:
         return "timeout"
     if "预算已用尽" in reason:
@@ -27624,6 +28084,7 @@ def prepare_worker_retry(state: dict[str, Any], error_text: str) -> tuple[int, b
     quota_exhausted = state["worker_retry_reason_code"] == "coding_agent_quota_exhausted"
     budget_exhausted = state["worker_retry_reason_code"] == "budget_exhausted"
     provider_auth_unavailable = state["worker_retry_reason_code"] == "provider_auth_unavailable"
+    lock_contention = state["worker_retry_reason_code"] == "workspace_lock_contention"
     triage_result_error = any(
         marker in str(error_text or "")
         for marker in (
@@ -27647,6 +28108,7 @@ def prepare_worker_retry(state: dict[str, Any], error_text: str) -> tuple[int, b
         )
         and not quota_exhausted
         and not provider_auth_unavailable
+        and not lock_contention
     ):
         state["developer_session_handoff"] = build_developer_session_handoff(state, error_text)
         rotate_session(state, "developer", reason=f"context_recovery:{state['worker_retry_reason_code']}")
@@ -27667,6 +28129,19 @@ def prepare_worker_retry(state: dict[str, Any], error_text: str) -> tuple[int, b
         )
     retry_exponent = max(0, int(state.get("worker_retry_same_error_count", 0)) - 1)
     delay = min(900, max(15, int(state["poll_seconds"])) * (2 ** min(retry_exponent, 4)))
+    if lock_contention:
+        delay = max(
+            1,
+            min(
+                30,
+                int(
+                    _env_positive_float(
+                        "WF_WORKSPACE_LOCK_RETRY_SECONDS",
+                        AGENT_EXECUTION_LOCK_CONTENTION_RETRY_SECONDS,
+                    )
+                ),
+            ),
+        )
     if quota_exhausted:
         reset_match = re.search(r'"?resetsAt"?\s*[:=]\s*"?(\d{10,13})', str(error_text or ""), re.IGNORECASE)
         if reset_match:
@@ -27682,7 +28157,8 @@ def prepare_worker_retry(state: dict[str, Any], error_text: str) -> tuple[int, b
     if budget_exhausted:
         state["status"] = "retrying_error"
         state["last_error"] = error_text
-        _mark_initial_build_attention(state)
+        if not lock_contention:
+            _mark_initial_build_attention(state)
         set_public_work_summary(
             state,
             kind="retrying",
@@ -27697,11 +28173,15 @@ def prepare_worker_retry(state: dict[str, Any], error_text: str) -> tuple[int, b
         )
     except (TypeError, ValueError):
         circuit_limit = WORKER_RECOVERY_CIRCUIT_DEFAULT
-    if int(state.get("worker_retry_count") or 0) >= circuit_limit:
+    if (
+        not lock_contention
+        and int(state.get("worker_retry_count") or 0) >= circuit_limit
+    ):
         reason_code = str(state.get("worker_retry_reason_code") or "background_step_failed")
         state["status"] = "retrying_error"
         state["last_error"] = error_text
-        _mark_initial_build_attention(state)
+        if not lock_contention:
+            _mark_initial_build_attention(state)
         state["internal_recovery_diagnostic"] = {
             "reason_code": f"worker_retry_circuit:{reason_code}",
             "recoverable": True,
@@ -27732,7 +28212,15 @@ def prepare_worker_retry(state: dict[str, Any], error_text: str) -> tuple[int, b
     state["worker_retry_after"] = time.time() + delay
     state["status"] = "retrying_error"
     state["last_error"] = error_text
-    _mark_initial_build_attention(state)
+    if not lock_contention:
+        _mark_initial_build_attention(state)
+    if lock_contention:
+        set_public_work_summary(
+            state,
+            kind="retrying",
+            current="其他智能体正在释放工作区，系统将自动继续",
+            next_step="无需手动恢复",
+        )
     return delay, rotated
 
 
