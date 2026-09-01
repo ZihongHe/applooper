@@ -161,15 +161,6 @@ CATALOG: dict[str, dict[str, str]] = {
         "使用恢复操作创建新的执行会话并继续当前阶段",
         "Use Resume to create a fresh execution session and continue this stage",
     ),
-    "study.progress.no_reply": pair(
-        "查看进展详情",
-        "View progress details",
-    ),
-    "study.progress.confirmation": pair("需要您确认", "Confirmation needed"),
-    "study.progress.continuing": pair(
-        "研发流程正在继续",
-        "The development workflow is continuing",
-    ),
 }
 
 

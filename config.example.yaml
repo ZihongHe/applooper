@@ -3,6 +3,7 @@
 host: 127.0.0.1
 port: 8765
 projects_dir: ./workspaces   # or an absolute local folder
+state_dir: ./state           # local runtime state; keep outside version control
 
 llm:
   provider: ""          # agnes | claude | openrouter | custom

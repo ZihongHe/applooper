@@ -85,18 +85,18 @@ TASK_VERIFICATION_MODES = {"candidate", "external_non_blocking", "retired"}
 EXPERIENCE_VERIFICATION_STATUSES = {"verified", "failed", "blocked", "unverified"}
 EXPERIENCE_TRIAGE_TYPES = {"product_issue", "verification_gap", "environment_blocker"}
 INTERNAL_TEST_COHORT_SIZE = 2
-TREATMENT_INTERNAL_TEST_COHORT_SIZE = 2
-TREATMENT_EXPERIENCE_WAVE_CLOSE_AFTER = 2
+DEVELOPMENTAL_INTERNAL_TEST_COHORT_SIZE = 2
+DEVELOPMENTAL_EXPERIENCE_WAVE_CLOSE_AFTER = 2
 EXPERIENCE_FIRST_ROUND_MAX_STEPS = 5
 EXPERIENCE_PERSONA_WRAP_SECONDS = 8 * 60
 EXPERIENCE_PERSONA_SOFT_STOP_SECONDS = 10 * 60
 EXPERIENCE_PERSONA_TIMEOUT_SECONDS = 12 * 60
-STUDY_EVALUATION_PROTOCOL_VERSION = "blind-standardized-release-v1"
-STUDY_EVALUATOR_PROMPT_ID = "blind-artifact-regression-cuj-v1"
-STUDY_EVALUATOR_DEFAULT_MODEL = "agnes-2.5-flash"
-STUDY_EVALUATOR_DEFAULT_TEMPERATURE = 0.0
-STUDY_EVALUATOR_DEFAULT_MAX_ATTEMPTS = 2
-STUDY_SHARED_CUJ_MAX_STEPS = 8
+RELEASE_EVALUATION_PROTOCOL_VERSION = "blind-standardized-release-v1"
+RELEASE_EVALUATOR_PROMPT_ID = "blind-artifact-regression-cuj-v1"
+RELEASE_EVALUATOR_DEFAULT_MODEL = "agnes-2.5-flash"
+RELEASE_EVALUATOR_DEFAULT_TEMPERATURE = 0.0
+RELEASE_EVALUATOR_DEFAULT_MAX_ATTEMPTS = 2
+SHARED_CUJ_MAX_STEPS = 8
 WORKER_RECOVERY_CIRCUIT_DEFAULT = 3
 WORKER_PROCESS_EXIT_CIRCUIT_DEFAULT = 3
 AGENT_EXECUTION_LOCK_WAIT_SECONDS = 7_200.0
@@ -140,50 +140,6 @@ STRICT_ROUND_LIMIT_RESUME_ACTION = (
 RUNTIME_EPOCH_ENV = "APPLOOPER_RUNTIME_EPOCH"
 RUNTIME_EPOCH_FILE_ENV = "APPLOOPER_RUNTIME_EPOCH_FILE"
 RUNTIME_EPOCH_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}")
-PROJECT_REPOSITORY_SKILL_PATH = (
-    Path(__file__).resolve().parent
-    / "skills"
-    / "project-repository-management"
-    / "SKILL.md"
-)
-APPLICATION_SKILL_PATHS = {
-    "application-launch": Path(__file__).resolve().parent / "skills" / "application-launch" / "SKILL.md",
-    "application-operations": Path(__file__).resolve().parent / "skills" / "application-operations" / "SKILL.md",
-}
-OPERATIONS_MODEL_FILENAME = "app_operations.json"
-OPERATIONS_METRIC_KEYS = (
-    "daily_active_users",
-    "monthly_active_users",
-    "new_users",
-    "retention",
-    "active_trend",
-    "version_adoption",
-    "errors",
-    "crashes",
-)
-OPERATIONS_SERIES_METRICS = {"active_trend", "version_adoption"}
-
-REPOSITORY_PROVIDER_LABELS = {
-    "local": "本地工作空间",
-    "github": "GitHub",
-    "gitlab": "GitLab",
-    "gitee": "Gitee",
-    "unity_version_control": "Unity Version Control",
-    "custom": "自定义代码库",
-}
-REPOSITORY_PROVIDER_ALIASES = {
-    "unity": "unity_version_control",
-    "unity_vcs": "unity_version_control",
-    "plastic": "unity_version_control",
-    "plastic_scm": "unity_version_control",
-}
-LIFECYCLE_EXTERNAL_ACTIONS = {
-    "external_publish": "对外发布",
-    "create_public_repository": "创建公开代码库",
-    "enable_analytics": "加入真实用户数据统计（埋点）",
-    "send_broadcast": "向用户群发消息",
-    "spend_money": "执行可能产生费用的操作",
-}
 EXPERIENCE_SURFACE_LABELS = {
     "desktop_web": "电脑网页端",
     "mobile_web": "手机网页端",
@@ -201,12 +157,9 @@ questions 只有在编排代码明确传入“已通过真实体验重大变更�
 严禁输出分析/推理/分类过程、置信度、schema/status 字段、英文枚举、原始数组/对象、工具记录，以及 SEG/TASK/PERSONA/session 等内部编号。
 不得写“邮件含……”“判断为……”“不落操作”“转澄清”等内部决策措辞。summary 仅供内部状态记录，绝不能复制到用户邮件。
 引用护栏时不得写 G-008/G008 等内部代码，必须写“护栏编号第八条”，并紧跟该条护栏的中文含义。遇到 WAP 等术语，先用一句中文解释，再提出可直接回答的问题。"""
-STUDY_TREATMENT_CONDITION = "applooper_bound"
-STUDY_BASELINE_CONDITION = "claude_preview"
-STUDY_CONDITION_KEYS = frozenset({STUDY_TREATMENT_CONDITION, STUDY_BASELINE_CONDITION})
 APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_DEFAULT = 20
 APPLOOPER_DEVELOPMENTAL_EXPERIENCE_ROUNDS_MAX = 200
-TREATMENT_TEST_AGENT_ID = "development-test-agent"
+DEVELOPMENT_TEST_AGENT_ID = "development-test-agent"
 RELEASE_FAIL_DEVELOPMENTAL_TRIGGERS = frozenset(
     {
         "release_basic_failed",
@@ -216,93 +169,56 @@ RELEASE_FAIL_DEVELOPMENTAL_TRIGGERS = frozenset(
 )
 
 
-def study_participant_ui(state: dict[str, Any]) -> dict[str, Any]:
-    """Return study UI flags persisted on the workflow (ops/repo/PM gates)."""
-
-    raw = state.get("study_participant_ui")
-    return dict(raw) if isinstance(raw, dict) else {}
-
-
-def study_operations_mode_enabled(state: dict[str, Any]) -> bool:
-    """Operations / growth tools are not part of the local product."""
-
-    return False
-
-
-def study_repository_management_enabled(state: dict[str, Any]) -> bool:
-    """Repository-management UI is not part of the local product."""
-
-    return False
-
-
-def study_project_manager_enabled(state: dict[str, Any]) -> bool:
-    """The project-manager agent is not part of the local product."""
-
-    return False
-
-
-def study_show_release_platform_config(state: dict[str, Any]) -> bool:
-    """Release-platform configuration is not part of the local product."""
-
-    return False
-
-
-def study_show_release_attestation(state: dict[str, Any]) -> bool:
-    """Typed release attestation is not part of the local product."""
-
-    return False
-
-
-def study_multi_agent_treatment_enabled(state: dict[str, Any]) -> bool:
+def multi_agent_workflow_enabled(state: dict[str, Any]) -> bool:
     """Every local app uses the AppLooper multi-agent workflow."""
 
     return True
 
 
-def normalize_study_evaluation_protocol(value: Any) -> dict[str, Any] | None:
-    """Return the bounded, condition-blind protocol shared by a paired trial.
+def normalize_release_evaluation_protocol(value: Any) -> dict[str, Any] | None:
+    """Return the bounded evaluation protocol shared by a local application.
 
-    The object is rebuilt from an allowlist so A/B labels, hidden condition
-    names, developer summaries, conversations and virtual-user narratives
-    cannot reach the release evaluator through this channel.
+    The object is rebuilt from an allowlist so unrelated metadata, developer
+    summaries, conversations and virtual-user narratives cannot reach the
+    release evaluator through this channel.
     """
 
     if value in (None, "", {}):
         return None
     if isinstance(value, str):
         if len(value) > 24_000:
-            raise WorkflowError("study evaluation protocol is too large")
+            raise WorkflowError("release evaluation protocol is too large")
         try:
             value = json.loads(value)
         except json.JSONDecodeError as exc:
-            raise WorkflowError("study evaluation protocol must be valid JSON") from exc
+            raise WorkflowError("release evaluation protocol must be valid JSON") from exc
     if not isinstance(value, dict):
-        raise WorkflowError("study evaluation protocol must be an object")
+        raise WorkflowError("release evaluation protocol must be an object")
 
     version = str(value.get("version") or "").strip()
-    if version != STUDY_EVALUATION_PROTOCOL_VERSION:
-        raise WorkflowError("unsupported study evaluation protocol version")
+    if version != RELEASE_EVALUATION_PROTOCOL_VERSION:
+        raise WorkflowError("unsupported release evaluation protocol version")
     if value.get("blinded") is not True:
-        raise WorkflowError("study release evaluation must be blinded")
+        raise WorkflowError("release evaluation must be blinded")
 
     evaluator = value.get("evaluator")
     if not isinstance(evaluator, dict):
-        raise WorkflowError("study evaluator contract is missing")
+        raise WorkflowError("release evaluator contract is missing")
     model = str(evaluator.get("model") or "").strip()
     prompt_id = str(evaluator.get("prompt_id") or "").strip()
     if not model or len(model) > 120 or not re.fullmatch(r"[A-Za-z0-9._:/-]+", model):
-        raise WorkflowError("study evaluator model is invalid")
-    if prompt_id != STUDY_EVALUATOR_PROMPT_ID:
-        raise WorkflowError("study evaluator prompt is not the frozen blinded prompt")
+        raise WorkflowError("release evaluator model is invalid")
+    if prompt_id != RELEASE_EVALUATOR_PROMPT_ID:
+        raise WorkflowError("release evaluator prompt is not the frozen blinded prompt")
     try:
         temperature = float(evaluator.get("temperature"))
         max_attempts = int(evaluator.get("max_attempts"))
     except (TypeError, ValueError) as exc:
-        raise WorkflowError("study evaluator parameters are invalid") from exc
-    if temperature != STUDY_EVALUATOR_DEFAULT_TEMPERATURE:
-        raise WorkflowError("study evaluator temperature must be 0")
+        raise WorkflowError("release evaluator parameters are invalid") from exc
+    if temperature != RELEASE_EVALUATOR_DEFAULT_TEMPERATURE:
+        raise WorkflowError("release evaluator temperature must be 0")
     if max_attempts < 1 or max_attempts > 5:
-        raise WorkflowError("study evaluator max_attempts must be between 1 and 5")
+        raise WorkflowError("release evaluator max_attempts must be between 1 and 5")
 
     shared_cuj = value.get("shared_cuj")
     if not isinstance(shared_cuj, dict):
@@ -332,24 +248,24 @@ def normalize_study_evaluation_protocol(value: Any) -> dict[str, Any] | None:
             raise WorkflowError("shared CUJ contains an invalid step")
         seen_step_ids.add(step_id)
         steps.append({"id": step_id, "action": action})
-    if not steps or len(steps) > STUDY_SHARED_CUJ_MAX_STEPS:
+    if not steps or len(steps) > SHARED_CUJ_MAX_STEPS:
         raise WorkflowError("shared CUJ must contain a bounded non-empty step list")
 
     regression = value.get("regression_policy")
     if not isinstance(regression, dict):
-        raise WorkflowError("study regression policy is missing")
+        raise WorkflowError("release regression policy is missing")
     regression_policy_id = str(regression.get("id") or "").strip()
     if regression_policy_id != "declared-tests-plus-frozen-requirements-v1":
-        raise WorkflowError("study regression policy is invalid")
+        raise WorkflowError("release regression policy is invalid")
 
     return {
-        "version": STUDY_EVALUATION_PROTOCOL_VERSION,
+        "version": RELEASE_EVALUATION_PROTOCOL_VERSION,
         "blinded": True,
         "evaluator": {
             "model": model,
-            "temperature": STUDY_EVALUATOR_DEFAULT_TEMPERATURE,
+            "temperature": RELEASE_EVALUATOR_DEFAULT_TEMPERATURE,
             "max_attempts": max_attempts,
-            "prompt_id": STUDY_EVALUATOR_PROMPT_ID,
+            "prompt_id": RELEASE_EVALUATOR_PROMPT_ID,
         },
         "regression_policy": {
             "id": regression_policy_id,
@@ -365,15 +281,15 @@ def normalize_study_evaluation_protocol(value: Any) -> dict[str, Any] | None:
     }
 
 
-def study_evaluator_contract(state: dict[str, Any]) -> dict[str, Any]:
-    protocol = normalize_study_evaluation_protocol(state.get("study_evaluation_protocol"))
+def release_evaluator_contract(state: dict[str, Any]) -> dict[str, Any]:
+    protocol = normalize_release_evaluation_protocol(state.get("release_evaluation_protocol"))
     if protocol is not None:
         return dict(protocol["evaluator"])
     return {
         "model": str(state.get("model") or os.environ.get("WF_MODEL") or "provider-default"),
-        "temperature": STUDY_EVALUATOR_DEFAULT_TEMPERATURE,
-        "max_attempts": STUDY_EVALUATOR_DEFAULT_MAX_ATTEMPTS,
-        "prompt_id": STUDY_EVALUATOR_PROMPT_ID,
+        "temperature": RELEASE_EVALUATOR_DEFAULT_TEMPERATURE,
+        "max_attempts": RELEASE_EVALUATOR_DEFAULT_MAX_ATTEMPTS,
+        "prompt_id": RELEASE_EVALUATOR_PROMPT_ID,
     }
 
 
@@ -388,7 +304,7 @@ def model_for_role(state: dict[str, Any], role: str) -> str:
         else str(role)
     )
     if normalized_role == "reviewer":
-        protocol = normalize_study_evaluation_protocol(state.get("study_evaluation_protocol"))
+        protocol = normalize_release_evaluation_protocol(state.get("release_evaluation_protocol"))
         if protocol is not None:
             return str(protocol["evaluator"].get("model") or "")
     overrides = state.get("role_model_overrides")
@@ -397,8 +313,8 @@ def model_for_role(state: dict[str, Any], role: str) -> str:
     return str(state.get("model") or "")
 
 
-def study_shared_cuj_steps(state: dict[str, Any]) -> list[dict[str, str]]:
-    protocol = normalize_study_evaluation_protocol(state.get("study_evaluation_protocol"))
+def shared_cuj_steps(state: dict[str, Any]) -> list[dict[str, str]]:
+    protocol = normalize_release_evaluation_protocol(state.get("release_evaluation_protocol"))
     if protocol is None:
         return []
     return [dict(step) for step in protocol["shared_cuj"]["steps"]]
@@ -839,15 +755,10 @@ RUNTIME_ENVIRONMENT_POLICY = (
 )
 
 PRODUCT_LIFECYCLE_POLICY = (
-    "产品版本通过验收只表示 ready_to_publish（可以进入发布准备），绝不表示已经对外发布。"
-    "每次交付都要用不懂技术的用户能看懂的话说明：当前是否已具备发布条件、仍缺哪些信息、下一版本最应注意什么。"
-    "对外发布、创建公开代码库、加入真实用户数据统计（埋点）、向用户群发消息以及执行可能产生费用的操作，"
-    "都必须先取得用户对该单项操作的明确同意；一次只确认一件事，不得把多项授权捆绑在一个问题中。"
-    "未经确认不得执行这些外部操作，也不得把本地交付描述成上线、上架或已发布。"
-    "代码库提供方必须保持可扩展，可使用 GitHub、GitLab、Gitee、Unity Version Control、自定义代码库或仅保存在本地；"
-    "访问令牌、密码、密钥和其他凭据绝不能写入工作流 state。"
-    "发布后的运营策略只能基于已接入的真实用户数据、真实反馈和版本事实；没有真实数据时必须明确说明，绝不能用体验者智能体数据冒充。"
-    "每次只给一个最值得优先执行的运营建议，并说明它应进入当前修复还是下一个版本。"
+    "产品通过验收后仍只保存在本地工作区。"
+    "不得执行外部发布、上传或远程代码库操作，也不得把本地交付描述成已经上线。"
+    "用户需要交付物时，只准备可由 AppLooper 本地下载的源码包。"
+    "访问令牌、密码、密钥和其他凭据绝不能写入工作流状态或源码包。"
 )
 
 ROLE_PROMPTS = {
@@ -869,13 +780,10 @@ ROLE_PROMPTS = {
 对注册/登录表单必须做字段类型 vs 错误文案横向校验：手机号字段不得提示邮箱格式错误，邮箱字段不得提示手机号格式错误；发现不一致必须作为 blocker 级问题上报。
 公开字段必须用第一人称、像真人在讲自己刚怎么用这个应用：先说自己用的是手机还是电脑、当时想办成什么事，再说卡在哪一步、点了什么却做不了。不要写成验收清单或「没做成：步骤」；公开 action/evidence/title/actual 里不要出现合成手机号、测试账号、验证码或内部步骤编号。
 逐项记录证据和截图，只提交自己真实感到不满意的问题。无法实际操作时必须报告失败，绝不能臆测成功。禁止调用交互式提问工具，禁止自行发送邮件或直接联系用户。""",
-    "operations": """你是只读的运营智能体。你只负责读取已经配置并获准访问的上线目标、公开平台统计或授权数据源，整理真实运营指标、版本分布、异常和一个最值得执行的下一步建议。
-不得修改源码、发布版本、上传安装包、改变可见性、增加埋点、购买服务、联系真实用户或执行任何外部写操作。没有来源或授权时必须返回未配置或不可用，绝不能用体验者智能体、测试数据、推测值或示例值冒充真实用户数据。
-每个数字都必须附带来源标识、采集时间和可核验 provenance；跨平台无法可靠去重时必须分来源展示。不要输出内部推理、系统提示、凭证或工具参数。""" + PRODUCT_LIFECYCLE_POLICY,
     "internal_test_analyst": """你是只读的独立内部测试分析智能体。只汇总输入中明确标记为 virtual_cohort 的模拟遥测：覆盖率、路由/点击语义目标、体验次数、任务通过/失败和反馈关键词/聚类。
 所有数字和结论必须明确标记“模拟”，不得读取、推断、合并或声称代表运营数据、生产数据、真实用户或真实流量。来源不明确的记录必须排除。不得修改源码、测试、状态或外部系统；只能返回有界结构化摘要。""",
     "test_maintainer": """你是只读的测试维护智能体。你只能提出结构化的测试、fixture 和场景 manifest 变更建议，不能直接修改产品源码或执行任意写操作。
-每项建议必须位于服务端允许的测试/fixture 路径中，并记录测试契约、oracle provenance、确定性层级、mutation 与 flaky 风险。不得弱化共享回归、共享 CUJ、P0/P1、安全、无障碍或冻结需求。两个研究条件必须能够冻结并复用同一份契约。""",
+每项建议必须位于允许的测试/fixture 路径中，并记录测试契约、oracle provenance、确定性层级、mutation 与 flaky 风险。不得弱化共享回归、共享 CUJ、P0/P1、安全、无障碍或冻结需求。所有应用工作流必须能够复用同一份契约。""",
     "development_tester": """你是 AppLooper 开发期内测智能体，只读检查当前可运行版本，不能修改源码。
 必须先复现研发智能体最后报告或恢复记录中的失败，再检查当前任务、关键接口和可见页面；同一命令已经失败时，先定位根因，禁止只重复执行同一个命令。可运行网页必须通过真实浏览器操作并记录证据。只报告实际发现的问题，不把尚未实现的后续任务误报为缺陷。不得提问、发布或联系真实用户。""",
     "owner_proxy": """你是只读的产品所有者意图模拟智能体，不是目标用户画像，也不是真实所有者。你有两种严格分离的工作模式。feedback_precheck 模式只依据输入中逐项给出的冻结意图、当前用户原话、明确历史消息、已确认约束及 source_id，在反馈进入研发前检查其一致性、冲突、缺失信息与可执行验收点；不得运行 Computer Use，不得拒绝或改写真实用户的反馈，只能向研发提供带来源的建议。post_fix_replay 模式才通过真实 Computer Use 检查一个已修复场景。
@@ -915,12 +823,10 @@ RUNTIME_ENVIRONMENT_POLICY_EN = (
 )
 
 PRODUCT_LIFECYCLE_POLICY_EN = (
-    "Passing acceptance means ready_to_publish, never already published. "
-    "External publish, creating a public repository, enabling real user analytics, mass messaging, or fee-bearing actions "
-    "each require separate explicit user consent. Without confirmation, do not perform those external actions "
-    "and do not describe local delivery as launched or published. "
-    "Credentials must never be written into workflow state. "
-    "Post-launch operations advice must rely on real connected data; never substitute virtual-user evidence for real users."
+    "An accepted application remains in its local workspace. "
+    "Do not publish, upload, or perform remote source-control actions, and do not describe local delivery as launched. "
+    "When the user needs a deliverable, prepare only the source package downloadable from AppLooper. "
+    "Never write credentials to workflow state or the source package."
 )
 
 ROLE_PROMPTS_EN = {
@@ -942,13 +848,10 @@ If persona_initial_state.auth_mode is test_account, log in with that test accoun
 For registration/login forms, cross-check field type versus error copy: a phone field must not show an email-format error, and an email field must not show a phone-format error; inconsistencies are blocker-level issues.
 Public fields must read like a real person recounting the trial: say whether you used a phone or a computer, what you were trying to get done, and where you got stuck. Do not write a QA checklist or "I could not: step" lines. Do not put synthetic phone numbers, test accounts, OTPs, or internal step IDs in public action/evidence/title/actual.
 Record evidence and screenshots item by item, and submit only problems you actually encountered. If you cannot operate the UI, report failure; never invent success. Do not call interactive questioning tools, and do not email or directly contact users.""",
-    "operations": """You are a read-only operations agent. You only read already configured and authorized launch targets, public platform statistics, or permitted data sources, then organize real operations metrics, version distribution, anomalies, and one highest-value next action.
-Do not modify source code, publish versions, upload packages, change visibility, add analytics, purchase services, contact real users, or perform any external write. Without a source or authorization, return unconfigured/unavailable; never substitute experience-agent data, test data, guesses, or examples for real user data.
-Every number needs a source identifier, collection time, and verifiable provenance; when cross-platform deduplication is unreliable, report by source. Do not expose internal reasoning, system prompts, credentials, or tool parameters.""" + PRODUCT_LIFECYCLE_POLICY_EN,
     "internal_test_analyst": """You are a read-only independent internal-test analysis agent. Summarize only simulated telemetry explicitly labeled as virtual_cohort: coverage, route/click semantic targets, experience counts, task pass/fail, and feedback keywords/clusters.
 Every number and conclusion must be labeled as simulated. Do not read, infer, merge, or claim to represent operations data, production data, real users, or real traffic. Exclude records with unclear provenance. Do not modify source code, tests, state, or external systems; return only a bounded structured summary.""",
     "test_maintainer": """You are a read-only test-maintenance agent. You may only propose structured changes to tests, fixtures, and scenario manifests; you cannot directly modify product source or perform arbitrary writes.
-Every proposal must stay in server-allowed test/fixture paths and record the test contract, oracle provenance, determinism layer, and mutation/flaky risk. Do not weaken shared regression, shared CUJs, P0/P1, security, accessibility, or frozen requirements. Both study conditions must be able to freeze and reuse the same contract.""",
+Every proposal must stay in allowed test/fixture paths and record the test contract, oracle provenance, determinism layer, and mutation/flaky risk. Do not weaken shared regression, shared CUJs, P0/P1, security, accessibility, or frozen requirements. Every application workflow must be able to reuse the same contract.""",
     "development_tester": """You are AppLooper's read-only developmental test agent. Inspect the current runnable build and never modify product source.
 Reproduce the developer's latest reported or recovered failure first, then check the current task, critical interfaces, and visible UI. When the same command already failed, diagnose the root cause before running it again. Exercise runnable web UI through a real browser and record evidence. Report only observed defects; do not treat later unimplemented tasks as defects. Do not ask questions, publish, or contact real users.""",
     "owner_proxy": """You are a read-only product-owner intent agent acting as the owner-intent simulation agent, not a target-user persona and not the real owner. You have two strictly separated modes. In feedback_precheck mode, use only the itemized frozen intent, current verbatim user message, explicit prior messages, confirmed constraints, and source_id values to check consistency, conflicts, missing information, and executable acceptance checks before feedback reaches development; do not use Computer Use, reject or rewrite real-user feedback, and provide only source-backed developer guidance. In post_fix_replay mode, inspect one repaired scenario through real Computer Use.
@@ -1237,13 +1140,10 @@ def is_agnes_qualification_state(state: dict[str, Any]) -> bool:
     )
 
 
-def should_expand_study_persona_cohort(state: dict[str, Any]) -> bool:
-    """Expand fictional virtual users for study treatment and trial workspaces."""
+def should_expand_generated_persona_cohort(state: dict[str, Any]) -> bool:
+    """Expand fictional virtual users for compatibility and trial workspaces."""
 
     if is_agnes_qualification_state(state):
-        return True
-    condition = str(state.get("study_condition") or "").strip()
-    if condition and condition != STUDY_BASELINE_CONDITION:
         return True
     workspace = str(state.get("workspace") or "").replace("\\", "/")
     return "/applooper-trials/" in workspace or "/.applooper-trials/" in workspace
@@ -1384,69 +1284,6 @@ OWNER_FEEDBACK_PRECHECK_SCHEMA = obj(
         "source_ids",
     ],
 )
-# The App-management (project manager) agent is the default recipient of the main
-# conversation. It answers the user in plain language, recognises intents, and can
-# dispatch work to the developer / operations agents by relaying the user's words.
-PROJECT_MANAGER_INTENTS = [
-    "none",
-    "launch",
-    "update_target_users",
-    "configure_launch",
-    "configure_feedback",
-    "configure_analytics",
-    "configure_promotion",
-]
-PROJECT_MANAGER_DISPATCH_SCHEMA = obj(
-    {
-        "agent": {"type": "string", "enum": ["developer", "operations"]},
-        "message": STR,
-    },
-    ["agent", "message"],
-)
-PROJECT_MANAGER_REPLY_SCHEMA = obj(
-    {
-        "reply_to_user": STR,
-        "intent": {"type": "string", "enum": PROJECT_MANAGER_INTENTS},
-        "dispatch": {"type": "array", "items": PROJECT_MANAGER_DISPATCH_SCHEMA},
-        "context_summary": STR,
-    },
-    ["reply_to_user", "intent", "dispatch", "context_summary"],
-)
-# Direct reply used when the user @-mentions the operations agent from the main
-# conversation, bypassing the project manager.
-OPERATIONS_DIRECT_REPLY_SCHEMA = obj(
-    {"title": STR, "body": STR, "context_summary": STR},
-    ["title", "body", "context_summary"],
-)
-OPERATIONS_SERIES_POINT_SCHEMA = obj(
-    {"label": STR, "value": NUM, "at": STR, "version": STR},
-    ["label", "value", "at", "version"],
-)
-OPERATIONS_METRIC_REPORT_SCHEMA = obj(
-    {
-        "key": {"type": "string", "enum": list(OPERATIONS_METRIC_KEYS)},
-        "status": {"type": "string", "enum": ["available", "unavailable", "error"]},
-        "value_number": NUM,
-        "series": {"type": "array", "items": OPERATIONS_SERIES_POINT_SCHEMA},
-        "source_id": STR,
-        "observed_at": STR,
-        "provenance": STR,
-        "error": STR,
-    },
-    ["key", "status", "value_number", "series", "source_id", "observed_at", "provenance", "error"],
-)
-OPERATIONS_SUGGESTION_SCHEMA = obj(
-    {"title": STR, "body": STR, "metric_keys": STRS, "source_ids": STRS},
-    ["title", "body", "metric_keys", "source_ids"],
-)
-OPERATIONS_REFRESH_SCHEMA = obj(
-    {
-        "summary": STR,
-        "metrics": {"type": "array", "items": OPERATIONS_METRIC_REPORT_SCHEMA},
-        "suggestions": {"type": "array", "items": OPERATIONS_SUGGESTION_SCHEMA},
-    },
-    ["summary", "metrics", "suggestions"],
-)
 TEST_RESULT_SCHEMA = obj({"command": STR, "exit_code": NUM, "evidence": STR}, ["command", "exit_code", "evidence"])
 QUESTION_SCHEMA = obj({"question": STR, "options": STRS}, ["question", "options"])
 EXPERIENCE_TWIN_VIEWPORT_SCHEMA = obj(
@@ -1470,8 +1307,8 @@ EXPERIENCE_TWIN_SURFACES = [
 # publishable to the community for online second-party use (draft §5.4: every
 # app must have a Web form; native-only forms differ too much across devices).
 WEB_EXPERIENCE_SURFACES = frozenset({"desktop_web", "mobile_web", "tablet_web"})
-DEFAULT_STUDY_WEB_EXPERIENCE_SURFACES = ("desktop_web", "mobile_web")
-_DEFAULT_STUDY_WEB_VIEW_CATALOG = {
+DEFAULT_WEB_EXPERIENCE_SURFACES = ("desktop_web", "mobile_web")
+_DEFAULT_WEB_VIEW_CATALOG = {
     "desktop_web": ("desktop", "电脑网页端", "Desktop browser", 1280, 800),
     "mobile_web": ("mobile", "手机网页端", "Mobile browser", 390, 844),
 }
@@ -1711,7 +1548,7 @@ _ANY_URL_RE = re.compile(r"https?://[^\s'\"\\]+", re.IGNORECASE)
 
 # Roles whose shell must never egress. surface_prep is excluded because its
 # sanctioned job includes user-confirmed dependency/runtime installation.
-EGRESS_GUARDED_ROLES = frozenset({"developer", "orchestrator", "operations"})
+EGRESS_GUARDED_ROLES = frozenset({"developer", "orchestrator"})
 
 
 def detect_unauthorized_egress(tool_uses: Any) -> str | None:
@@ -1870,79 +1707,6 @@ def write_egress_hook_settings(
     return settings_path, guard_path
 
 
-def project_repository_skill_text() -> str:
-    """Load the bundled repository Skill after a small fail-closed validation."""
-
-    path = PROJECT_REPOSITORY_SKILL_PATH
-    try:
-        if not path.is_file() or path.stat().st_size > 64_000:
-            raise OSError("missing or oversized Skill")
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise WorkflowError(
-            "项目仓库管理暂时无法运行，请修改 project-repository-management Skill 配置后重试"
-        ) from exc
-    match = re.fullmatch(
-        r"---\r?\n(?P<frontmatter>.*?)\r?\n---\r?\n(?P<body>.+)",
-        text.strip(),
-        flags=re.DOTALL,
-    )
-    if not match:
-        raise WorkflowError(
-            "项目仓库管理暂时无法运行，请修改 project-repository-management Skill 配置后重试"
-        )
-    metadata: dict[str, str] = {}
-    for line in match.group("frontmatter").splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        metadata[key.strip()] = value.strip()
-    if (
-        metadata.get("name") != "project-repository-management"
-        or not metadata.get("description")
-        or "[TODO" in text
-        or not match.group("body").strip()
-    ):
-        raise WorkflowError(
-            "项目仓库管理暂时无法运行，请修改 project-repository-management Skill 配置后重试"
-        )
-    return text.strip()
-
-
-def application_skill_text(name: str) -> str:
-    """Load a bundled launch/operations Skill after fail-closed validation."""
-
-    path = APPLICATION_SKILL_PATHS.get(str(name or ""))
-    error_message = f"{name or 'application'} Skill 暂时无法运行，请修改 Skill 配置后重试"
-    try:
-        if path is None or not path.is_file() or path.stat().st_size > 64_000:
-            raise OSError("missing or oversized Skill")
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise WorkflowError(error_message) from exc
-    match = re.fullmatch(
-        r"---\r?\n(?P<frontmatter>.*?)\r?\n---\r?\n(?P<body>.+)",
-        text.strip(),
-        flags=re.DOTALL,
-    )
-    if not match:
-        raise WorkflowError(error_message)
-    metadata: dict[str, str] = {}
-    for line in match.group("frontmatter").splitlines():
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        metadata[key.strip()] = value.strip()
-    if (
-        metadata.get("name") != name
-        or not metadata.get("description")
-        or "[TODO" in text
-        or not match.group("body").strip()
-    ):
-        raise WorkflowError(error_message)
-    return text.strip()
-
-
 def prompt_ui_locale(state: dict[str, Any] | None = None, locale: str | None = None) -> str:
     """Resolve the UI/prompt locale for bilingual role templates."""
 
@@ -1970,6 +1734,21 @@ def public_bubble_language_instruction(locale: str) -> str:
         "evidence，以及 issues 的 title/description/actual/expected，请尽量用中文撰写。"
         "不要照抄另一种语言的 task_script；按同样意思改写成中文。"
         "专有名词、按钮原文和代码标识可以保留原文。"
+    )
+
+
+def generated_application_language_instruction(locale: str) -> str:
+    """Keep generated application copy aligned with the selected UI language."""
+
+    if app_i18n.normalize_locale(locale) == app_i18n.EN:
+        return (
+            "[Generated application language] Write navigation, buttons, labels, "
+            "empty states, validation messages, sample content, and other visible "
+            "application copy in English. Preserve user-supplied text verbatim."
+        )
+    return (
+        "【生成应用语言】导航、按钮、标签、空状态、校验提示、示例内容及其他可见应用文案"
+        "请使用中文；用户自行提供的文字保持原样。"
     )
 
 
@@ -2028,6 +1807,8 @@ def coding_role_prompt(
         + public_bubble_language_instruction(ui_locale)
         + "\n"
     )
+    if prompt_role == "developer":
+        base += generated_application_language_instruction(ui_locale) + "\n"
     if os.environ.get("WF_AGNES_COMPAT") == "1":
         base += (
             "\n\n[OpenAI tool-adapter compatibility]\n"
@@ -2075,7 +1856,7 @@ def coding_role_prompt(
                 "one implementation task per independently tryable user-facing capability "
                 "(quick entry and a summary dashboard are two tasks, not one title joined "
                 "by 'and' or an equivalent conjunction). Task titles must name only the "
-                "user-facing feature a participant can try; never include internal "
+                "user-facing feature a user can try; never include internal "
                 "execution context such as P0/P1/P2/P3, ports, manifest-only, credentials, "
                 "Experience Twin, CUJ ids, or English variable names. Add one deterministic "
                 "verification task that depends on those implementation tasks. "
@@ -2112,7 +1893,7 @@ def coding_role_prompt(
                 "StructuredOutput immediately instead of repeating equivalent checks. "
                 "Never inspect `.claude-workflow`, agent/session metadata, conversation or "
                 "progress logs, prior verdicts, screenshots from earlier agents, workflow "
-                "labels, or condition identifiers. Do not infer which study workflow produced "
+                "labels, or condition identifiers. Do not infer which application workflow produced "
                 "the artifact. Then submit StructuredOutput with exactly these six root fields and no "
                 "others: `summary` string; `guardrails` array of objects shaped "
                 "{\"id\":\"...\",\"status\":\"PASS|FAIL|BLOCKED\",\"evidence\":\"...\"}; "
@@ -2154,65 +1935,7 @@ def coding_role_prompt(
                 "After the final HTTP check, submit StructuredOutput immediately with no "
                 "additional grep, find, read-back, or cleanup calls.\n"
             )
-    if prompt_role == "operations":
-        skills: list[str] = []
-        for name in ("application-launch", "application-operations"):
-            try:
-                skills.append(application_skill_text(name))
-            except WorkflowError:
-                skills.append(
-                    (
-                        f"{name} Skill is currently unavailable. Do not invent launch "
-                        "configuration, call data sources, or fabricate operations metrics; "
-                        "ask the user to repair that Skill configuration and retry."
-                    )
-                    if ui_locale == "en"
-                    else (
-                        f"{name} Skill 当前不可用。不得推测上线配置、调用数据源或生成运营指标；"
-                        "请向用户提示修改该 Skill 配置后重试。"
-                    )
-                )
-        if ui_locale == "en":
-            return (
-                base.rstrip()
-                + "\n\n[Built-in launch and operations Skills]\n"
-                + "\n\n".join(skills)
-                + "\n[End of Skills]\n"
-            )
-        return (
-            base.rstrip()
-            + "\n\n【内置上线与运营 Skills】\n"
-            + "\n\n".join(skills)
-            + "\n【Skills 结束】\n"
-        )
-    if prompt_role != "developer":
-        return base
-    try:
-        skill = project_repository_skill_text()
-    except WorkflowError:
-        skill = (
-            "project-repository-management Skill is currently unavailable. Do not "
-            "configure the project repository; ask the user to repair that Skill "
-            "configuration and retry."
-            if ui_locale == "en"
-            else (
-                "project-repository-management Skill 当前不可用。不得执行项目仓库配置；"
-                "请向用户提示修改该 Skill 配置后重试。"
-            )
-        )
-    if ui_locale == "en":
-        return (
-            base.rstrip()
-            + "\n\n[Built-in project-repository Skill]\n"
-            + skill
-            + "\n[End of Skill]\n"
-        )
-    return (
-        base.rstrip()
-        + "\n\n【内置项目仓库管理 Skill】\n"
-        + skill
-        + "\n【Skill 结束】\n"
-    )
+    return base
 
 
 EXPERIENCE_TWIN_MAX_VIEWS = 12
@@ -2681,22 +2404,22 @@ def requested_experience_surfaces(state: dict[str, Any]) -> set[str]:
     }
 
 
-def paired_study_default_web_views_enabled(state: dict[str, Any]) -> bool:
+def default_web_views_enabled(state: dict[str, Any]) -> bool:
     """Whether desktop and mobile Web views are always available."""
 
     return True
 
 
-def ensure_paired_study_default_web_views(
+def ensure_default_web_views(
     state: dict[str, Any], twin: dict[str, Any]
 ) -> dict[str, Any]:
-    """Backfill the paired study's two default Web views without losing state."""
+    """Backfill the local application's two default Web views without losing state."""
 
-    if not paired_study_default_web_views_enabled(state):
+    if not default_web_views_enabled(state):
         return twin
     views = [dict(view) for view in twin.get("views") or [] if isinstance(view, dict)]
     present = {str(view.get("surface") or "") for view in views}
-    if all(surface in present for surface in DEFAULT_STUDY_WEB_EXPERIENCE_SURFACES):
+    if all(surface in present for surface in DEFAULT_WEB_EXPERIENCE_SURFACES):
         return twin
     route = next(
         (
@@ -2707,10 +2430,10 @@ def ensure_paired_study_default_web_views(
         "/",
     )
     used_ids = {str(view.get("id") or "") for view in views}
-    for surface in DEFAULT_STUDY_WEB_EXPERIENCE_SURFACES:
+    for surface in DEFAULT_WEB_EXPERIENCE_SURFACES:
         if surface in present:
             continue
-        preferred_id, label, device_name, width, height = _DEFAULT_STUDY_WEB_VIEW_CATALOG[surface]
+        preferred_id, label, device_name, width, height = _DEFAULT_WEB_VIEW_CATALOG[surface]
         view_id = preferred_id
         suffix = 2
         while view_id in used_ids:
@@ -2733,12 +2456,12 @@ def ensure_paired_study_default_web_views(
     return normalize_experience_twin({**twin, "views": views})
 
 
-def sync_paired_study_default_surface_records(
+def sync_default_web_surface_records(
     state: dict[str, Any], twin: dict[str, Any]
 ) -> bool:
     """Keep the legacy surface list from hiding a view present in the Twin."""
 
-    if not paired_study_default_web_views_enabled(state):
+    if not default_web_views_enabled(state):
         return False
     raw = state.get("experience_surfaces")
     records = [dict(item) if isinstance(item, dict) else item for item in raw] if isinstance(raw, list) else []
@@ -2752,7 +2475,7 @@ def sync_paired_study_default_surface_records(
         if not isinstance(view, dict):
             continue
         surface = str(view.get("surface") or "")
-        if surface not in DEFAULT_STUDY_WEB_EXPERIENCE_SURFACES or surface in present:
+        if surface not in DEFAULT_WEB_EXPERIENCE_SURFACES or surface in present:
             continue
         records.append(dict(view))
         present.add(surface)
@@ -2787,13 +2510,13 @@ def developmental_experience_round_limit(state: dict[str, Any] | None = None) ->
     return fallback
 
 
-def treatment_loop_count(state: dict[str, Any]) -> int:
+def developmental_loop_count(state: dict[str, Any]) -> int:
     with contextlib.suppress(TypeError, ValueError, OverflowError):
         return max(0, int(state.get("developmental_experience_rounds") or 0))
     return 0
 
 
-def study_preview_port(state: dict[str, Any]) -> int | None:
+def configured_preview_port(state: dict[str, Any]) -> int | None:
     """Read only the server-authored, workflow-specific loopback port contract."""
 
     intent = str(state.get("intent") or "")
@@ -2822,9 +2545,9 @@ def _recovered_preview_views(state: dict[str, Any]) -> list[dict[str, Any]]:
         for surface in ("desktop_web", "mobile_web", "tablet_web")
         if surface in requested
     ]
-    if paired_study_default_web_views_enabled(state):
-        web_surfaces = list(DEFAULT_STUDY_WEB_EXPERIENCE_SURFACES) + [
-            surface for surface in web_surfaces if surface not in DEFAULT_STUDY_WEB_EXPERIENCE_SURFACES
+    if default_web_views_enabled(state):
+        web_surfaces = list(DEFAULT_WEB_EXPERIENCE_SURFACES) + [
+            surface for surface in web_surfaces if surface not in DEFAULT_WEB_EXPERIENCE_SURFACES
         ]
     elif not web_surfaces:
         web_surfaces = ["desktop_web"]
@@ -2851,20 +2574,20 @@ def _recovered_preview_views(state: dict[str, Any]) -> list[dict[str, Any]]:
     return views
 
 
-def recover_study_preview_checkpoint(state: dict[str, Any]) -> bool:
+def recover_preview_checkpoint(state: dict[str, Any]) -> bool:
     """Persist a runnable AppLooper preview even if the developer envelope was lost.
 
     The endpoint is never guessed or scanned: it must be the loopback port that
-    ``workflow_web`` embedded in the signed study intent. Redirects are disabled,
+    ``workflow_web`` embedded in the signed application configuration. Redirects are disabled,
     and a bounded HTML response is required before any Experience Twin is saved.
     """
 
-    if not study_multi_agent_treatment_enabled(state):
+    if not multi_agent_workflow_enabled(state):
         return False
     existing = experience_twin_from_state(state)
     if existing is not None:
         return False
-    port = study_preview_port(state)
+    port = configured_preview_port(state)
     if port is None:
         return False
     entry = f"http://127.0.0.1:{port}/"
@@ -2927,7 +2650,7 @@ def usable_development_preview_checkpoint(state: dict[str, Any]) -> bool:
     sending the developer back through the same failed command loop.
     """
 
-    if not study_multi_agent_treatment_enabled(state):
+    if not multi_agent_workflow_enabled(state):
         return False
     twin = experience_twin_from_state(state)
     if twin is None:
@@ -2936,7 +2659,7 @@ def usable_development_preview_checkpoint(state: dict[str, Any]) -> bool:
         validate_experience_twin_completeness(state, twin)
     except WorkflowError:
         return False
-    port = study_preview_port(state)
+    port = configured_preview_port(state)
     entry = str(twin.get("entry") or "").rstrip("/") + "/"
     if port is None or entry != f"http://127.0.0.1:{port}/":
         return False
@@ -3306,39 +3029,13 @@ def experience_persona_wrap_seconds(state: dict[str, Any]) -> int:
     return min(timeout, EXPERIENCE_PERSONA_WRAP_SECONDS)
 
 
-def treatment_experience_wave_size(_state: dict[str, Any] | None = None) -> int:
-    with contextlib.suppress(TypeError, ValueError):
-        return max(
-            1,
-            min(
-                int(
-                    os.environ.get(
-                        "WF_TREATMENT_EXPERIENCE_WAVE_SIZE",
-                        str(TREATMENT_INTERNAL_TEST_COHORT_SIZE),
-                    )
-                ),
-                8,
-            ),
-        )
-    return TREATMENT_INTERNAL_TEST_COHORT_SIZE
+def developmental_experience_wave_size(_state: dict[str, Any] | None = None) -> int:
+    return DEVELOPMENTAL_INTERNAL_TEST_COHORT_SIZE
 
 
-def treatment_experience_wave_close_after(state: dict[str, Any] | None = None) -> int:
-    size = treatment_experience_wave_size(state)
-    with contextlib.suppress(TypeError, ValueError):
-        return max(
-            1,
-            min(
-                int(
-                    os.environ.get(
-                        "WF_TREATMENT_EXPERIENCE_WAVE_CLOSE_AFTER",
-                        str(TREATMENT_EXPERIENCE_WAVE_CLOSE_AFTER),
-                    )
-                ),
-                size,
-            ),
-        )
-    return min(TREATMENT_EXPERIENCE_WAVE_CLOSE_AFTER, size)
+def developmental_experience_wave_close_after(state: dict[str, Any] | None = None) -> int:
+    size = developmental_experience_wave_size(state)
+    return min(DEVELOPMENTAL_EXPERIENCE_WAVE_CLOSE_AFTER, size)
 
 
 def agent_timeout_seconds_for_role(state: dict[str, Any], role: str) -> int:
@@ -3358,7 +3055,7 @@ def agent_timeout_seconds_for_role(state: dict[str, Any], role: str) -> int:
     if role == "reviewer":
         # Deep release evaluation is capped separately from the global agent
         # timeout. Default is 20 minutes so a stalled provider cannot hold the
-        # participant workflow for the legacy one-hour global timeout.
+        # user workflow for the legacy one-hour global timeout.
         with contextlib.suppress(TypeError, ValueError):
             reviewer_timeout = int(
                 os.environ.get(
@@ -3998,13 +3695,13 @@ def experience_twin_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
         if candidate is None:
             continue
         try:
-            return ensure_paired_study_default_web_views(
+            return ensure_default_web_views(
                 state, normalize_experience_twin(candidate)
             )
         except WorkflowError:
             continue
     legacy = legacy_experience_twin(developer.get("experience_entry"))
-    return ensure_paired_study_default_web_views(state, legacy) if legacy is not None else None
+    return ensure_default_web_views(state, legacy) if legacy is not None else None
 
 
 def utcnow() -> str:
@@ -4163,13 +3860,6 @@ def lifecycle_identifier(value: Any, fallback: str = "", *, limit: int = 64) -> 
     return (cleaned[: max(1, limit)] or fallback).strip()
 
 
-def repository_provider_id(value: Any) -> str:
-    """Canonicalize known providers without closing the model to new providers."""
-
-    provider = lifecycle_identifier(value, "local")
-    return REPOSITORY_PROVIDER_ALIASES.get(provider, provider)
-
-
 def lifecycle_text_list(value: Any, *, item_limit: int = 24, text_limit: int = 500) -> list[str]:
     values = [value] if isinstance(value, str) else value
     if not isinstance(values, (list, tuple)):
@@ -4185,18 +3875,10 @@ def lifecycle_text_list(value: Any, *, item_limit: int = 24, text_limit: int = 5
 
 
 def default_product_lifecycle() -> dict[str, Any]:
-    """A local-only lifecycle is safe for old workflows and performs no side effect."""
+    """Return local release history without any external-service controls."""
 
     return {
         "schema_version": PRODUCT_LIFECYCLE_VERSION,
-        "repository": {
-            "provider_id": "local",
-            "display_name": REPOSITORY_PROVIDER_LABELS["local"],
-            "connection_status": "local_only",
-            "url": "",
-            "branch": "",
-            "visibility": "private",
-        },
         "release_plan": {
             "target": "",
             "missing_information": [],
@@ -4211,57 +3893,6 @@ def default_product_lifecycle() -> dict[str, Any]:
             "next_confirmation": "",
         },
         "releases": [],
-    }
-
-
-def sanitize_repository_url(value: Any) -> str:
-    """Keep a useful repository locator without retaining URL credentials."""
-
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    # Keep common git SCP locators (for example git@github.com:org/repo.git).
-    # A password-bearing user:password@host form deliberately does not match.
-    if re.fullmatch(r"(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9.-]+:[^\s?#]+", raw):
-        return raw[:500]
-    try:
-        parsed = urllib.parse.urlsplit(raw)
-        port = parsed.port
-    except ValueError:
-        return ""
-    scheme = parsed.scheme.casefold()
-    if scheme not in {"http", "https", "ssh", "git"} or not parsed.hostname:
-        return ""
-    hostname = parsed.hostname
-    if ":" in hostname and not hostname.startswith("["):
-        hostname = f"[{hostname}]"
-    netloc = hostname + (f":{port}" if port is not None else "")
-    # Username/password, query parameters, and fragments can all carry secrets.
-    return urllib.parse.urlunsplit((scheme, netloc, parsed.path, "", ""))[:500]
-
-
-def normalize_repository_lifecycle(value: Any) -> dict[str, str]:
-    """Allow-list repository metadata; credentials and credential URLs are never retained."""
-
-    source = value if isinstance(value, dict) else {}
-    provider = repository_provider_id(source.get("provider_id") or source.get("provider") or "local")
-    default_label = REPOSITORY_PROVIDER_LABELS.get(provider, provider.replace("_", " ").strip().title())
-    connection_status = lifecycle_identifier(
-        source.get("connection_status") or source.get("status"),
-        "local_only" if provider == "local" else "not_connected",
-    )
-    if connection_status not in {"local_only", "not_connected", "connection_required", "connected", "error"}:
-        connection_status = "local_only" if provider == "local" else "not_connected"
-    visibility = lifecycle_identifier(source.get("visibility"), "private")
-    if visibility not in {"private", "internal", "public", "unspecified"}:
-        visibility = "private"
-    return {
-        "provider_id": provider,
-        "display_name": lifecycle_safe_text(source.get("display_name"), default_label, limit=100),
-        "connection_status": connection_status,
-        "url": sanitize_repository_url(source.get("url") or source.get("remote_url")),
-        "branch": lifecycle_safe_text(source.get("branch"), "", limit=120),
-        "visibility": visibility,
     }
 
 
@@ -4298,11 +3929,10 @@ def lifecycle_surface_list(value: Any) -> list[str]:
 
 
 def normalize_product_lifecycle(value: Any) -> dict[str, Any]:
-    """Migrate lifecycle snapshots through a credential-free, provider-extensible schema."""
+    """Normalize the local release history used by the build workflow."""
 
     source = value if isinstance(value, dict) else {}
     normalized = default_product_lifecycle()
-    normalized["repository"] = normalize_repository_lifecycle(source.get("repository"))
 
     raw_plan = source.get("release_plan") if isinstance(source.get("release_plan"), dict) else {}
     normalized["release_plan"] = {
@@ -4364,10 +3994,6 @@ def normalize_product_lifecycle(value: Any) -> dict[str, Any]:
             "created_at": created_at,
             "status": status,
             "evidence": lifecycle_release_evidence(raw_release.get("evidence")),
-            # A strict study budget may freeze the best available candidate for
-            # human review even when the autonomous evaluator did not certify it
-            # as generally publishable.  Preserve that distinction through
-            # lifecycle normalization instead of silently relabelling it.
             "reviewable_prototype": bool(raw_release.get("reviewable_prototype")),
             "threshold_met": raw_release.get("threshold_met") is not False,
             "selection_reason": lifecycle_safe_text(
@@ -4405,20 +4031,6 @@ def normalize_product_lifecycle(value: Any) -> dict[str, Any]:
         "next_version_attention": lifecycle_safe_text(raw_guidance.get("next_version_attention"), "", limit=500),
         "next_confirmation": next_confirmation,
     }
-    # Newer Web clients may keep the credential-free operations contract in
-    # lifecycle.json before the standalone app_operations.json is created.
-    # Preserve that extension during migration so the worker can consume its
-    # queued refreshes instead of silently dropping them.
-    raw_operations = source.get("operations")
-    if isinstance(raw_operations, dict):
-        normalized["operations"] = json.loads(json.dumps(raw_operations, ensure_ascii=False))
-    for key in ("deployment_skill", "operations_skill"):
-        if isinstance(source.get(key), (dict, str)):
-            normalized[key] = json.loads(json.dumps(source[key], ensure_ascii=False))
-    if isinstance(source.get("deployment_targets"), list):
-        normalized["deployment_targets"] = json.loads(
-            json.dumps(source["deployment_targets"], ensure_ascii=False)
-        )
     return normalized
 
 
@@ -4636,7 +4248,7 @@ def _freeze_reviewable_prototype(
 def finalize_strict_round_limit_as_reviewable_prototype(state: dict[str, Any]) -> bool:
     """Force the current candidate into pending-publish at the 50-step cap.
 
-    When the relevant agents have not yet agreed to release, the study still
+    When the relevant agents have not yet agreed to release, the workflow
     freezes the latest candidate as ready_to_publish so the owner can accept it.
     """
 
@@ -4686,7 +4298,7 @@ def product_tasks_ready_for_pending_publish(state: dict[str, Any]) -> bool:
 def finalize_stagnant_verify_as_reviewable_prototype(state: dict[str, Any]) -> bool:
     """Stop looping when consecutive rounds only repeat last-loop verification."""
 
-    if study_multi_agent_treatment_enabled(state):
+    if multi_agent_workflow_enabled(state):
         # Pending publish is earned when this wave's virtual users and test
         # agent pass, or when the configured loop cap is reached.
         return False
@@ -4850,7 +4462,7 @@ def build_release_evidence_bundle(state: dict[str, Any]) -> dict[str, Any]:
         scenario_evidence.append(normalize_scenario_evidence(
             row,
             candidate_id=current_candidate,
-            shared_cuj_required=bool(study_shared_cuj_steps(state)),
+            shared_cuj_required=bool(shared_cuj_steps(state)),
         ))
     return {
         "task": task_evidence[:12],
@@ -5420,19 +5032,19 @@ def _merge_web_owned_state_namespaces(
 
     A worker can hold a workflow snapshot across a Web request.  The request
     now mutates a fresh state under ``StateWriteLock``; this reverse merge keeps
-    the worker's later atomic step from erasing the UI locale or study event
+    the worker's later atomic step from erasing the UI locale or workflow event
     queue that was committed while that step was in flight.
     """
 
     if str(source.get("ui_locale") or ""):
         target["ui_locale"] = source["ui_locale"]
 
-    source_bridge = source.get("study_event_bridge")
+    source_bridge = source.get("workflow_event_bridge")
     if isinstance(source_bridge, dict):
-        target_bridge = target.get("study_event_bridge")
+        target_bridge = target.get("workflow_event_bridge")
         if not isinstance(target_bridge, dict):
             target_bridge = {}
-        target["study_event_bridge"] = {**target_bridge, **source_bridge}
+        target["workflow_event_bridge"] = {**target_bridge, **source_bridge}
 
     def records(value: Any) -> list[dict[str, Any]]:
         raw = (
@@ -5444,8 +5056,8 @@ def _merge_web_owned_state_namespaces(
         )
         return [row for row in raw if isinstance(row, dict)]
 
-    target_records = records(target.get("study_event_outbox"))
-    source_records = records(source.get("study_event_outbox"))
+    target_records = records(target.get("workflow_event_outbox"))
+    source_records = records(source.get("workflow_event_outbox"))
     if source_records:
         merged: list[dict[str, Any]] = []
         positions: dict[str, int] = {}
@@ -5457,7 +5069,7 @@ def _merge_web_owned_state_namespaces(
             if event_id:
                 positions[event_id] = len(merged)
             merged.append(row)
-        target["study_event_outbox"] = {
+        target["workflow_event_outbox"] = {
             "version": 1,
             "records": merged[-500:],
         }
@@ -5519,7 +5131,7 @@ def _merge_web_state_revisions(
 ) -> None:
     """Replay newer online Web mutations into an older worker snapshot.
 
-    A worker that loaded revision N may save after a participant committed
+    A worker that loaded revision N may save after a user committed
     revision N+1.  Copy only that domain's explicit key whitelist (including
     absence as a tombstone). Once the worker reloads N+1, its own later changes
     are allowed because the revisions match.
@@ -6637,6 +6249,8 @@ def linux_file_lock_holder_pids(path: Path) -> set[int]:
 
 
 _AGENT_EXECUTION_ABORT_BY_STATE_ID: dict[int, Any] = {}
+_AGENT_EXECUTION_REENTRANT_GUARD = threading.RLock()
+_AGENT_EXECUTION_REENTRANT: dict[str, dict[str, Any]] = {}
 
 
 def agent_execution_should_abort(state: Mapping[str, Any] | None) -> bool:
@@ -6756,6 +6370,8 @@ class AgentExecutionLock:
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
         self._lease_acquired_at = 0.0
+        self._reentrant_key = os.path.normcase(str(self.path.resolve(strict=False)))
+        self._reentrant_owner: AgentExecutionLock | None = None
 
     def lease_path(self) -> Path:
         return self.path.with_name(self.path.name + ".lease")
@@ -6764,6 +6380,8 @@ class AgentExecutionLock:
         return self.path.with_name(self.path.name + ".preempt")
 
     def should_abort(self) -> bool:
+        if self._reentrant_owner is not None:
+            return self._reentrant_owner.should_abort()
         if self._held_beyond_lease():
             return True
         payload = self._read_json(self.preempt_path())
@@ -6938,6 +6556,20 @@ class AgentExecutionLock:
                 fcntl.flock(self.fp.fileno(), fcntl.LOCK_UN)
 
     def __enter__(self) -> "AgentExecutionLock":
+        thread_id = threading.get_ident()
+        with _AGENT_EXECUTION_REENTRANT_GUARD:
+            active = _AGENT_EXECUTION_REENTRANT.get(self._reentrant_key)
+            if active and int(active.get("thread_id") or 0) == thread_id:
+                active["depth"] = int(active.get("depth") or 1) + 1
+                owner = active.get("lock")
+                if isinstance(owner, AgentExecutionLock):
+                    self._reentrant_owner = owner
+                self._trace(
+                    "workspace_lock_reentered",
+                    depth=active["depth"],
+                    owner_role=getattr(owner, "role", ""),
+                )
+                return self
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.fp = self.path.open("a+b")
         if os.fstat(self.fp.fileno()).st_size == 0:
@@ -6955,6 +6587,12 @@ class AgentExecutionLock:
                 self._clear_sidecar(self.preempt_path())
                 self._write_lease()
                 self._start_heartbeat()
+                with _AGENT_EXECUTION_REENTRANT_GUARD:
+                    _AGENT_EXECUTION_REENTRANT[self._reentrant_key] = {
+                        "thread_id": thread_id,
+                        "depth": 1,
+                        "lock": self,
+                    }
                 return self
             except OSError as exc:
                 last_exc = exc
@@ -6982,6 +6620,18 @@ class AgentExecutionLock:
                 time.sleep(0.1 if not unhealthy else 0.2)
 
     def __exit__(self, *_: Any) -> None:
+        with _AGENT_EXECUTION_REENTRANT_GUARD:
+            active = _AGENT_EXECUTION_REENTRANT.get(self._reentrant_key)
+            if self._reentrant_owner is not None:
+                if active and int(active.get("thread_id") or 0) == threading.get_ident():
+                    active["depth"] = max(1, int(active.get("depth") or 2) - 1)
+                self._reentrant_owner = None
+                return
+            if active and active.get("lock") is self:
+                if int(active.get("depth") or 1) > 1:
+                    active["depth"] = int(active["depth"]) - 1
+                    return
+                _AGENT_EXECUTION_REENTRANT.pop(self._reentrant_key, None)
         self._stop_heartbeat()
         if self._read_lease().get("token") == self.token:
             self._clear_sidecar(self.lease_path())
@@ -7114,7 +6764,7 @@ def current_runtime_epoch() -> str:
     """Return the epoch assigned to this supervised tenant container.
 
     The entrypoint supplies the environment value to every process and mirrors
-    it into the durable participant state volume. The file fallback supports a
+    it into the durable user state volume. The file fallback supports a
     same-container web restart without inventing an epoch in application code.
     Unmanaged local installations retain legacy PID behavior.
     """
@@ -8184,7 +7834,7 @@ def fail_resume_request(
             or state.get("strict_round_limit_handoff")
         ):
             # Keep the review boundary honest: a refused auto-resume is not an
-            # abnormal pause for the participant publish checklist.
+            # abnormal pause for the user publish checklist.
             state["status"] = "delivered_listening"
             state["resume_launch_error"] = safe_detail
             if "release 验收边界" in safe_detail or "不能恢复自动研发" in safe_detail:
@@ -8588,7 +8238,7 @@ def migrate_state(state: dict[str, Any]) -> None:
         legacy_twin = experience_twin_from_state(state)
         if legacy_twin is not None:
             state["experience_twin"] = legacy_twin
-            sync_paired_study_default_surface_records(state, legacy_twin)
+            sync_default_web_surface_records(state, legacy_twin)
             changed = True
     else:
         try:
@@ -8596,11 +8246,11 @@ def migrate_state(state: dict[str, Any]) -> None:
         except WorkflowError:
             canonical_twin = None
         if canonical_twin is not None:
-            canonical_twin = ensure_paired_study_default_web_views(state, canonical_twin)
+            canonical_twin = ensure_default_web_views(state, canonical_twin)
             if canonical_twin != state["experience_twin"]:
                 state["experience_twin"] = canonical_twin
                 changed = True
-            if sync_paired_study_default_surface_records(state, canonical_twin):
+            if sync_default_web_surface_records(state, canonical_twin):
                 changed = True
     if state.setdefault("channel", "email") not in {"email", "web"}:
         state["channel"] = "email"
@@ -8647,26 +8297,7 @@ def migrate_state(state: dict[str, Any]) -> None:
     if state.get("ui_locale") != canonical_ui_locale:
         state["ui_locale"] = canonical_ui_locale
         changed = True
-    if "study_evaluation_protocol" not in state:
-        state["study_evaluation_protocol"] = None
-        changed = True
-    elif state.get("study_evaluation_protocol") is not None:
-        canonical_protocol = normalize_study_evaluation_protocol(
-            state.get("study_evaluation_protocol")
-        )
-        if canonical_protocol != state.get("study_evaluation_protocol"):
-            state["study_evaluation_protocol"] = canonical_protocol
-            changed = True
-    if "study_condition" not in state:
-        # Existing non-paired workflows keep legacy full-AppLooper behavior.
-        # Existing paired runs are backfilled from the community trial ledger
-        # during deployment, where the authoritative blinded assignment lives.
-        state["study_condition"] = ""
-        changed = True
-    elif str(state.get("study_condition") or "") not in {*STUDY_CONDITION_KEYS, ""}:
-        state["study_condition"] = ""
-        changed = True
-    # Older releases described a strict study step-budget exhaustion as a
+    # Older releases described strict step-budget exhaustion as a
     # recovery hold even though Resume had no authority to increase that frozen
     # budget. Migrate it to the protocol's reviewable-prototype handoff.
     strict_limit_hold_seen = False
@@ -8685,7 +8316,7 @@ def migrate_state(state: dict[str, Any]) -> None:
         if finalize_strict_round_limit_as_reviewable_prototype(state):
             changed = True
     # Resume/launch failures against an intentional DELIVERED review boundary
-    # must not leave the participant-facing status as paused_error.
+    # must not leave the user-facing status as paused_error.
     delivered_boundary = str(state.get("phase") or "").upper() == "DELIVERED" or (
         isinstance(state.get("strict_round_limit_handoff"), dict)
         and bool(state["strict_round_limit_handoff"].get("completed"))
@@ -8737,7 +8368,7 @@ def migrate_state(state: dict[str, Any]) -> None:
         state["release_evaluator_transport_failures"] = {}
         if legacy_exhausted:
             legacy_error = FatalWorkflowError(
-                "study release evaluator exhausted its frozen attempt budget"
+                "release evaluator exhausted its frozen attempt budget"
             )
             hold = classify_safety_hold(legacy_error, state)
             hold["recoverable"] = True
@@ -8816,11 +8447,11 @@ def migrate_state(state: dict[str, Any]) -> None:
             before = json.dumps(persona, ensure_ascii=False, sort_keys=True)
             normalize_optional_persona_evidence(persona)
             changed = changed or before != json.dumps(persona, ensure_ascii=False, sort_keys=True)
-    expanded_study_personas = materialize_study_persona_cohort(state)
-    if expanded_study_personas != state.get("personas"):
-        state["personas"] = expanded_study_personas
-        if study_persona_cohort_is_current(state, expanded_study_personas):
-            state["study_persona_cohort_version"] = STUDY_PERSONA_COHORT_VERSION
+    expanded_personas = materialize_persona_cohort(state)
+    if expanded_personas != state.get("personas"):
+        state["personas"] = expanded_personas
+        if generated_persona_cohort_is_current(state, expanded_personas):
+            state["generated_persona_cohort_version"] = GENERATED_PERSONA_COHORT_VERSION
         changed = True
     if not isinstance(state.get("feedback_clusters"), dict):
         state["feedback_clusters"] = {
@@ -11354,7 +10985,7 @@ def claude_prompt_role(role: str) -> str:
     if role.startswith("surface_prep:"):
         return "surface_prep"
     if role in {
-        "developer", "operations", "coverage_auditor", "reviewer",
+        "developer", "coverage_auditor", "reviewer",
         "internal_test_analyst", "test_maintainer", "development_tester", "owner_proxy",
     }:
         return role
@@ -12375,8 +12006,6 @@ def call_codex_cli(
         if role.startswith("surface_prep:")
         else "developer"
         if role == "developer"
-        else "operations"
-        if role == "operations"
         else "internal_test_analyst"
         if role == "internal_test_analyst"
         else "test_maintainer"
@@ -12963,9 +12592,6 @@ SYNTHETIC_PHONE = "13800138000"
 SYNTHETIC_EMAIL = "testuser@example.test"
 SYNTHETIC_OTP = "000000"
 
-EUFR_P0_OPEN_STATUSES = frozenset({"collected", "acknowledged", "in_progress"})
-EUFR_BETA_PHASES = frozenset({"REVIEW", "EXPERIENCE", "DELIVER", "DELIVERED", "WAIT_USER", "REPLAY", "DEVELOP"})
-
 EXPERIENCE_CUJ_POLICY = (
     "交付前必须通过注册/登录 CUJ：允许在注册 UI 使用合成数据（手机号 13800138000、邮箱 testuser@example.test、验证码 000000 或 staging mock OTP），"
     "禁止真实 PII 与真实 SMS。必须做表单校验横向检查：字段类型与错误文案不得交叉（如手机号字段不得提示邮箱格式错误）。"
@@ -13026,7 +12652,7 @@ def experience_batch_identity(
     guardrail_set_id: str,
     cohort_ids: list[str],
 ) -> str:
-    protocol = normalize_study_evaluation_protocol(state.get("study_evaluation_protocol"))
+    protocol = normalize_release_evaluation_protocol(state.get("release_evaluation_protocol"))
     shared_cuj_id = str((protocol or {}).get("shared_cuj", {}).get("id") or "none")
     return (
         f"{candidate_id}:{guardrail_set_id}:r{state.get('round', 0)}:"
@@ -13145,7 +12771,7 @@ def experience_persona_script(
         return script
     existing_ids = {str(row.get("id") or "") for row in script}
     existing_actions = {str(row.get("action") or "") for row in script}
-    required_steps = study_shared_cuj_steps(state)
+    required_steps = shared_cuj_steps(state)
     if app_requires_auth_cuj(state):
         required_steps.extend(build_cuj_task_steps())
     for step in required_steps:
@@ -13208,7 +12834,7 @@ def update_cuj_gate_from_experience(
     results: list[dict[str, Any]],
     cohort: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    shared_steps = study_shared_cuj_steps(state)
+    shared_steps = shared_cuj_steps(state)
     auth_steps = build_cuj_task_steps() if app_requires_auth_cuj(state) else []
     required_steps = [*shared_steps, *auth_steps]
     if not required_steps:
@@ -13251,7 +12877,7 @@ def update_cuj_gate_from_experience(
         "failures": failures,
         "carrier_persona_id": carrier_id,
         "shared_cuj_id": str(
-            (normalize_study_evaluation_protocol(state.get("study_evaluation_protocol")) or {})
+            (normalize_release_evaluation_protocol(state.get("release_evaluation_protocol")) or {})
             .get("shared_cuj", {})
             .get("id", "")
         ),
@@ -13267,85 +12893,6 @@ def cuj_gate_passed(state: dict[str, Any]) -> bool:
     if not gate.get("required"):
         return True
     return bool(gate.get("passed"))
-
-
-def flag_eufr_p0_pending(state: dict[str, Any], theme: dict[str, Any]) -> None:
-    if str(theme.get("priority") or "").upper() != "P0":
-        return
-    if str(theme.get("status") or "").casefold() not in EUFR_P0_OPEN_STATUSES:
-        return
-    theme_id = str(theme.get("id") or "").strip()
-    if not theme_id:
-        return
-    pending = state.setdefault("pending_eufr_p0", [])
-    if not isinstance(pending, list):
-        pending = state["pending_eufr_p0"] = []
-    if theme_id in {str(item) for item in pending}:
-        return
-    pending.append(theme_id)
-    event(state, "eufr_p0_queued", theme_id=theme_id, title=str(theme.get("title") or "")[:160])
-
-
-def process_eufr_p0_feedback_cycle(state: dict[str, Any], mailer: Mailer | WebChannel) -> bool:
-    pending_raw = state.get("pending_eufr_p0")
-    pending = [str(item) for item in pending_raw if str(item)] if isinstance(pending_raw, list) else []
-    if not pending:
-        return False
-    phase = str(state.get("phase") or "").upper()
-    if phase not in EUFR_BETA_PHASES:
-        return False
-    if phase in {"EXPERIENCE", "REVIEW"} and str(state.get("status") or "") == "running":
-        return False
-    if state.get("pending_user"):
-        return False
-    model, storage = _read_operations_model(state)
-    if storage == "none":
-        return False
-    themes = model.get("eufr_themes") if isinstance(model.get("eufr_themes"), list) else []
-    theme_id = pending[0]
-    theme = next((row for row in themes if isinstance(row, dict) and str(row.get("id") or "") == theme_id), None)
-    state["pending_eufr_p0"] = pending[1:]
-    if not isinstance(theme, dict):
-        save_state(state)
-        return True
-    if str(theme.get("priority") or "").upper() != "P0":
-        save_state(state)
-        return True
-    if str(theme.get("status") or "").casefold() not in EUFR_P0_OPEN_STATUSES:
-        save_state(state)
-        return True
-    title = public_non_question_text(theme.get("title"), "P0 用户反馈")[:160]
-    summary = public_non_question_text(theme.get("summary"), "")[:1000]
-    theme["status"] = "in_progress"
-    theme["updated_at"] = utcnow()
-    _write_operations_model(state, model, storage)
-    state["feedback"] = [
-        {
-            "source": "eufr_explicit",
-            "priority": "P0",
-            "theme_id": theme_id,
-            "gate_failures": [f"P0 显式用户反馈：{title}"],
-            "issues": [
-                {
-                    "title": title,
-                    "severity": "blocker",
-                    "description": summary or title,
-                    "change_scope": "bug",
-                }
-            ],
-        }
-    ]
-    state["phase"] = "DEVELOP"
-    state["status"] = "running"
-    set_public_work_summary(
-        state,
-        kind="developing",
-        current=f"处理 P0 显式用户反馈：{title}",
-        next_step="修复后重新验收与体验测试",
-    )
-    event(state, "eufr_p0_development_started", theme_id=theme_id, title=title)
-    save_state(state)
-    return True
 
 
 def normalize_persona_initial_state(value: Any) -> dict[str, Any] | None:
@@ -13685,25 +13232,25 @@ def finalize_persona(raw: dict[str, Any], *, index: int = 0) -> dict[str, Any]:
     return persona
 
 
-STUDY_PERSONA_COHORT_VERSION = 5
-STUDY_PERSONA_COHORT_MIN = 4
-STUDY_PERSONA_COHORT_MAX = 8
-STUDY_I18N_TEXT_SCHEMA = obj({"zh-CN": STR, "en": STR}, ["zh-CN", "en"])
-STUDY_GENERATED_PERSONA_SCHEMA = obj(
+GENERATED_PERSONA_COHORT_VERSION = 5
+GENERATED_PERSONA_COHORT_MIN = 4
+GENERATED_PERSONA_COHORT_MAX = 8
+GENERATED_I18N_TEXT_SCHEMA = obj({"zh-CN": STR, "en": STR}, ["zh-CN", "en"])
+GENERATED_PERSONA_SCHEMA = obj(
     {
         "id": STR,
-        "name": STUDY_I18N_TEXT_SCHEMA,
-        "age": STUDY_I18N_TEXT_SCHEMA,
-        "gender": STUDY_I18N_TEXT_SCHEMA,
-        "location": STUDY_I18N_TEXT_SCHEMA,
-        "role": STUDY_I18N_TEXT_SCHEMA,
-        "tech_level": STUDY_I18N_TEXT_SCHEMA,
-        "device": STUDY_I18N_TEXT_SCHEMA,
-        "motivation": STUDY_I18N_TEXT_SCHEMA,
-        "constraints": STUDY_I18N_TEXT_SCHEMA,
-        "scenario": STUDY_I18N_TEXT_SCHEMA,
-        "habits": STUDY_I18N_TEXT_SCHEMA,
-        "group": STUDY_I18N_TEXT_SCHEMA,
+        "name": GENERATED_I18N_TEXT_SCHEMA,
+        "age": GENERATED_I18N_TEXT_SCHEMA,
+        "gender": GENERATED_I18N_TEXT_SCHEMA,
+        "location": GENERATED_I18N_TEXT_SCHEMA,
+        "role": GENERATED_I18N_TEXT_SCHEMA,
+        "tech_level": GENERATED_I18N_TEXT_SCHEMA,
+        "device": GENERATED_I18N_TEXT_SCHEMA,
+        "motivation": GENERATED_I18N_TEXT_SCHEMA,
+        "constraints": GENERATED_I18N_TEXT_SCHEMA,
+        "scenario": GENERATED_I18N_TEXT_SCHEMA,
+        "habits": GENERATED_I18N_TEXT_SCHEMA,
+        "group": GENERATED_I18N_TEXT_SCHEMA,
         "covered_segments": STRS,
         "task_script": {
             "type": "array",
@@ -13730,20 +13277,20 @@ STUDY_GENERATED_PERSONA_SCHEMA = obj(
         "task_script",
     ],
 )
-STUDY_PERSONA_COHORT_SCHEMA = obj(
+GENERATED_PERSONA_COHORT_SCHEMA = obj(
     {
         "personas": {
             "type": "array",
-            "items": STUDY_GENERATED_PERSONA_SCHEMA,
-            "minItems": STUDY_PERSONA_COHORT_MIN,
-            "maxItems": STUDY_PERSONA_COHORT_MAX,
+            "items": GENERATED_PERSONA_SCHEMA,
+            "minItems": GENERATED_PERSONA_COHORT_MIN,
+            "maxItems": GENERATED_PERSONA_COHORT_MAX,
         }
     },
     ["personas"],
 )
 
 
-def study_audience_text(state: dict[str, Any]) -> str:
+def target_audience_text(state: dict[str, Any]) -> str:
     """Read the start-stage 'who is it for' text used to seed virtual users."""
 
     for key in ("audience", "target_user", "goal"):
@@ -13764,7 +13311,7 @@ def study_audience_text(state: dict[str, Any]) -> str:
     return ""
 
 
-def _study_web_app_record(state: dict[str, Any]) -> dict[str, Any]:
+def _web_app_record(state: dict[str, Any]) -> dict[str, Any]:
     run_id = str(state.get("run_id") or "")
     if not run_id:
         return {}
@@ -13778,10 +13325,10 @@ def _study_web_app_record(state: dict[str, Any]) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def study_owner_app_brief(state: dict[str, Any]) -> dict[str, str]:
+def owner_app_brief(state: dict[str, Any]) -> dict[str, str]:
     """Collect the owner's app type, audience, and description for VU generation."""
 
-    record = _study_web_app_record(state)
+    record = _web_app_record(state)
     intent = str(state.get("intent") or record.get("intent") or "").strip()
     audience = str(
         state.get("audience")
@@ -13810,7 +13357,7 @@ def study_owner_app_brief(state: dict[str, Any]) -> dict[str, str]:
         app_type = app_type or parsed_en.group("app_type").strip()
         needs = needs or parsed_en.group("needs").strip()
     if not audience:
-        audience = study_audience_text(state)
+        audience = target_audience_text(state)
     brief = {
         "app_type": lifecycle_safe_text(app_type, limit=200),
         "audience": lifecycle_safe_text(audience, limit=300),
@@ -13825,7 +13372,7 @@ def study_owner_app_brief(state: dict[str, Any]) -> dict[str, str]:
     return brief
 
 
-def study_persona_cohort_is_current(
+def generated_persona_cohort_is_current(
     state: dict[str, Any],
     personas: list[dict[str, Any]] | None = None,
 ) -> bool:
@@ -13834,27 +13381,27 @@ def study_persona_cohort_is_current(
         for item in (personas if personas is not None else state.get("personas") or [])
         if isinstance(item, dict)
     ]
-    if not (STUDY_PERSONA_COHORT_MIN <= len(rows) <= STUDY_PERSONA_COHORT_MAX):
+    if not (GENERATED_PERSONA_COHORT_MIN <= len(rows) <= GENERATED_PERSONA_COHORT_MAX):
         return False
     try:
-        current_version = int(state.get("study_persona_cohort_version") or 0)
+        current_version = int(state.get("generated_persona_cohort_version") or 0)
     except (TypeError, ValueError):
         current_version = 0
-    if current_version < STUDY_PERSONA_COHORT_VERSION:
+    if current_version < GENERATED_PERSONA_COHORT_VERSION:
         return False
     for item in rows:
-        if str(item.get("study_profile_source") or "") != "llm":
+        if str(item.get("generated_profile_source") or "") != "llm":
             return False
         try:
-            profile_version = int(item.get("study_profile_version") or 0)
+            profile_version = int(item.get("generated_profile_version") or 0)
         except (TypeError, ValueError):
             return False
-        if profile_version < STUDY_PERSONA_COHORT_VERSION:
+        if profile_version < GENERATED_PERSONA_COHORT_VERSION:
             return False
     return True
 
 
-def _study_i18n_pair(value: Any, fallback: str = "") -> dict[str, str]:
+def _generated_i18n_pair(value: Any, fallback: str = "") -> dict[str, str]:
     if app_i18n.is_pair(value):
         return app_i18n.pair(
             app_i18n.resolve(value, app_i18n.ZH, fallback),
@@ -13864,13 +13411,13 @@ def _study_i18n_pair(value: Any, fallback: str = "") -> dict[str, str]:
     return app_i18n.pair(text, text)
 
 
-def generate_study_persona_cohort(
+def generate_persona_cohort(
     state: dict[str, Any],
     source: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Ask the LLM for 4-8 fictional users grounded only in the owner's app brief."""
 
-    brief = study_owner_app_brief(state)
+    brief = owner_app_brief(state)
     locale = prompt_ui_locale(state)
     planned = source[0] if source else {}
     payload = {
@@ -13879,7 +13426,7 @@ def generate_study_persona_cohort(
             "Ground every person in the owner's app_type, audience, and description only. "
             "If audience text conflicts with the app type or description, follow the app type and description. "
             "Do not reuse any preset office, student, water-tracker, or other catalog template. "
-            "Do not copy the participant's real identity or invent the participant's demographics. "
+            "Do not copy the user's real identity or invent the user's demographics. "
             "Each person must be a distinct everyday user of THIS app, with a unique name, role, "
             "scenario, motivation, constraints, habits, and a short task_script of concrete UI actions. "
             "Split the cohort across devices: about half primarily use a computer browser (desktop_web), "
@@ -13894,21 +13441,21 @@ def generate_study_persona_cohort(
             "id": planned.get("id") or "p01",
             "covered_segments": planned.get("covered_segments") or [],
         },
-        "count_min": STUDY_PERSONA_COHORT_MIN,
-        "count_max": STUDY_PERSONA_COHORT_MAX,
+        "count_min": GENERATED_PERSONA_COHORT_MIN,
+        "count_max": GENERATED_PERSONA_COHORT_MAX,
     }
     result = call_claude(
         state,
-        "study_persona_cohort",
+        "generated_persona_cohort",
         prompt_json("Generate virtual users from the owner app description", payload),
-        STUDY_PERSONA_COHORT_SCHEMA,
+        GENERATED_PERSONA_COHORT_SCHEMA,
         allowed_tools=["StructuredOutput"],
     )
     generated = [
         item for item in (result.get("personas") or []) if isinstance(item, dict)
     ]
-    if not (STUDY_PERSONA_COHORT_MIN <= len(generated) <= STUDY_PERSONA_COHORT_MAX):
-        raise WorkflowError("study persona cohort must contain 4 to 8 generated users")
+    if not (GENERATED_PERSONA_COHORT_MIN <= len(generated) <= GENERATED_PERSONA_COHORT_MAX):
+        raise WorkflowError("generated persona cohort must contain 4 to 8 users")
     localized_fields = (
         "name",
         "age",
@@ -13925,8 +13472,8 @@ def generate_study_persona_cohort(
     base_id = re.sub(
         r"[^a-zA-Z0-9_-]",
         "-",
-        str((source[0] if source else {}).get("id") or generated[0].get("id") or "study-user"),
-    )[:28] or "study-user"
+        str((source[0] if source else {}).get("id") or generated[0].get("id") or "generated-user"),
+    )[:28] or "generated-user"
     segments = [
         lifecycle_safe_text(item, limit=80)
         for item in ((source[0] if source else {}).get("covered_segments") or [])
@@ -13944,10 +13491,10 @@ def generate_study_persona_cohort(
         used_ids.add(persona_id)
         persona["id"] = persona_id[:40]
         for field in localized_fields:
-            localized = _study_i18n_pair(raw.get(field), str(persona.get(field) or ""))
+            localized = _generated_i18n_pair(raw.get(field), str(persona.get(field) or ""))
             persona[f"{field}_i18n"] = localized
             persona[field] = app_i18n.resolve(localized, locale)
-        group = _study_i18n_pair(raw.get("group"), brief.get("audience") or "目标用户")
+        group = _generated_i18n_pair(raw.get("group"), brief.get("audience") or "目标用户")
         persona["subpopulation_group_i18n"] = group
         persona["subpopulation_group"] = app_i18n.resolve(group, locale)
         covered = [
@@ -13958,15 +13505,15 @@ def generate_study_persona_cohort(
         persona["covered_segments"] = covered[:8] or [brief.get("audience") or "目标用户"]
         persona["task_script"] = raw.get("task_script") or persona.get("task_script") or []
         persona["population_weight"] = weight
-        persona["study_profile_version"] = STUDY_PERSONA_COHORT_VERSION
-        persona["study_profile_source"] = "llm"
+        persona["generated_profile_version"] = GENERATED_PERSONA_COHORT_VERSION
+        persona["generated_profile_source"] = "llm"
         persona["audience_source"] = brief.get("audience") or ""
         persona["app_type_source"] = brief.get("app_type") or ""
         expanded.append(finalize_persona(persona, index=index))
     return assign_persona_trial_surfaces(expanded)
 
 
-def materialize_study_persona_cohort(
+def materialize_persona_cohort(
     state: dict[str, Any],
     personas: list[dict[str, Any]] | None = None,
     *,
@@ -13979,28 +13526,28 @@ def materialize_study_persona_cohort(
         for item in (personas if personas is not None else state.get("personas") or [])
         if isinstance(item, dict)
     ]
-    if not should_expand_study_persona_cohort(state):
+    if not should_expand_generated_persona_cohort(state):
         return assign_persona_trial_surfaces(source)
-    if study_persona_cohort_is_current(state, source):
+    if generated_persona_cohort_is_current(state, source):
         assigned = assign_persona_trial_surfaces(source)
         state["personas"] = assigned
         return assigned
     if not generate:
         return assign_persona_trial_surfaces(source)
-    if not source and not any(study_owner_app_brief(state).values()):
+    if not source and not any(owner_app_brief(state).values()):
         return assign_persona_trial_surfaces(source)
     try:
-        expanded = generate_study_persona_cohort(state, source)
+        expanded = generate_persona_cohort(state, source)
     except (WorkflowStopRequested, FatalWorkflowError):
         raise
     except Exception as exc:
         event(
             state,
-            "study_persona_cohort_generate_failed",
+            "persona_cohort_generate_failed",
             error=f"{type(exc).__name__}: {exc}"[:500],
         )
         return assign_persona_trial_surfaces(source)
-    state["study_persona_cohort_version"] = STUDY_PERSONA_COHORT_VERSION
+    state["generated_persona_cohort_version"] = GENERATED_PERSONA_COHORT_VERSION
     assigned = assign_persona_trial_surfaces(expanded)
     state["personas"] = assigned
     return assigned
@@ -14363,9 +13910,9 @@ def repair_agnes_guardrails_from_intent(
     """Bind Agnes trial guardrails to exact, auditable clauses from the intent.
 
     Agnes-compatible models sometimes paraphrase ``source_quote`` or encode the
-    guardrail array inconsistently. For an isolated study trial, the host can
+    guardrail array inconsistently. For an local application, the host can
     safely remove that ambiguity: every non-empty clause below is copied
-    verbatim from the participant's original intent. No model-authored text is
+    verbatim from the user's original intent. No model-authored text is
     promoted to a constraint.
     """
 
@@ -14400,7 +13947,7 @@ def repair_agnes_single_persona_details(
     """Fill only missing persona fields with explicit unknown-value labels.
 
     These placeholders keep the experience runner executable without inventing
-    participant demographics. Existing model-authored values are preserved.
+    user demographics. Existing model-authored values are preserved.
     """
 
     personas = plan.get("personas")
@@ -14729,7 +14276,7 @@ def progress_is_unacknowledged(state: dict[str, Any]) -> bool:
 
 def progress_flush_threshold(state: dict[str, Any]) -> int:
     # Flush after every completed development loop so each round can post its
-    # own participant-visible bubble. The detailed checklist still lives in the
+    # own user-visible bubble. The detailed checklist still lives in the
     # progress panel; chat only carries one plain-language paragraph.
     progress_reporting_state(state)
     return 1
@@ -14797,8 +14344,8 @@ def _progress_digest_focus(state: dict[str, Any]) -> str:
 
 
 def _progress_digest_round(state: dict[str, Any]) -> int:
-    if study_multi_agent_treatment_enabled(state):
-        return treatment_loop_count(state)
+    if multi_agent_workflow_enabled(state):
+        return developmental_loop_count(state)
     reporting = progress_reporting_state(state)
     return max(
         0,
@@ -14939,7 +14486,7 @@ def virtual_user_improvement_updates(
     feedback: list[dict[str, Any]],
     changes: list[Any],
 ) -> list[str]:
-    """Build participant-safe receipts linking virtual-user findings to fixes."""
+    """Build user-safe receipts linking virtual-user findings to fixes."""
     personas = {
         str(item.get("id") or ""): item
         for item in state.get("personas") or []
@@ -15626,7 +15173,7 @@ def persist_scenario_evidence(state: dict[str, Any], value: Any) -> dict[str, An
     normalized = normalize_scenario_evidence(
         value,
         candidate_id=current_candidate,
-        shared_cuj_required=bool(study_shared_cuj_steps(state)),
+        shared_cuj_required=bool(shared_cuj_steps(state)),
     )
     store = state.setdefault("scenario_evidence", {"version": SCENARIO_EVIDENCE_VERSION, "records": []})
     if not isinstance(store, dict):
@@ -15951,18 +15498,13 @@ def run_owner_feedback_precheck(
 ) -> dict[str, Any] | None:
     """Check real-owner feedback before it reaches development.
 
-    This is AppLooper treatment-only, advisory and idempotent.  It never
+    This is AppLooper multi-agent, advisory and idempotent.  It never
     changes or rejects the user's words; it adds a source-addressable review
     bubble and a compact hand-off for the developer.
     """
 
     if (
-        not study_multi_agent_treatment_enabled(state)
-        or (
-            not str(state.get("study_condition") or "").strip()
-            and "owner_intent_profile" not in state
-            and "owner_feedback_prechecks" not in state
-        )
+        not multi_agent_workflow_enabled(state)
         or message.get("_pm_dispatch")
         or message.get("runtime_install_decision")
     ):
@@ -16174,7 +15716,7 @@ def owner_acceptance_contract_for_message(
     from target-user persona feedback and never grants release authority.
     """
 
-    if not study_multi_agent_treatment_enabled(state):
+    if not multi_agent_workflow_enabled(state):
         return None
     message_id = str(message.get("message_id") or "").strip()
     body = str(message.get("body") or "").strip()
@@ -16861,7 +16403,7 @@ def ensure_review_preview(state: dict[str, Any]) -> bool:
 def service_next_owner_acceptance(state: dict[str, Any]) -> bool:
     """Run one pending real-owner Computer Use acceptance at a safe boundary."""
 
-    if not study_multi_agent_treatment_enabled(state) or owner_proxy_bypassed(state):
+    if not multi_agent_workflow_enabled(state) or owner_proxy_bypassed(state):
         return False
     pending = [row for row in state.get("pending_owner_feedback") or [] if isinstance(row, dict)]
     item = next(
@@ -17142,11 +16684,11 @@ def request_test_maintainer_contract(
                     else state.get("test_maintainer_contract")
                 ),
                 "allowed_path_families": list(TEST_MAINTAINER_ALLOWLIST),
-                "shared_cuj": study_shared_cuj_steps(state),
+                "shared_cuj": shared_cuj_steps(state),
                 "frozen_requirements": active_guardrails(state),
                 "rule": (
                     "Structured proposals only. Never modify product source. "
-                    "Both study conditions must be able to freeze and share this contract."
+                    "Every application workflow must be able to reuse this contract."
                 ),
             },
         ),
@@ -17384,8 +16926,8 @@ def schedule_test_maintainer(state: dict[str, Any]) -> dict[str, Any] | None:
     return apply_test_maintainer_contract(state, contract)
 
 
-def _treatment_agent_display_name(state: dict[str, Any], agent_id: str) -> str:
-    if agent_id == TREATMENT_TEST_AGENT_ID:
+def _developmental_agent_display_name(state: dict[str, Any], agent_id: str) -> str:
+    if agent_id == DEVELOPMENT_TEST_AGENT_ID:
         return "测试智能体"
     for item in state.get("personas") or []:
         if isinstance(item, dict) and str(item.get("id") or "") == agent_id:
@@ -17393,8 +16935,8 @@ def _treatment_agent_display_name(state: dict[str, Any], agent_id: str) -> str:
     return "体验者"
 
 
-def _treatment_loop_participants(state: dict[str, Any], feedback: list[dict[str, Any]]) -> list[str]:
-    pending = state.get("pending_treatment_loop") if isinstance(state.get("pending_treatment_loop"), dict) else {}
+def _developmental_loop_users(state: dict[str, Any], feedback: list[dict[str, Any]]) -> list[str]:
+    pending = state.get("pending_developmental_loop") if isinstance(state.get("pending_developmental_loop"), dict) else {}
     ordered: list[str] = []
     for raw in list(pending.get("agent_ids") or []):
         agent_id = str(raw or "").strip()
@@ -17412,8 +16954,8 @@ def _treatment_loop_participants(state: dict[str, Any], feedback: list[dict[str,
         agent_id = str(persona.get("id") or "").strip()
         if agent_id and agent_id not in ordered:
             ordered.append(agent_id)
-    if TREATMENT_TEST_AGENT_ID not in ordered:
-        ordered.insert(0, TREATMENT_TEST_AGENT_ID)
+    if DEVELOPMENT_TEST_AGENT_ID not in ordered:
+        ordered.insert(0, DEVELOPMENT_TEST_AGENT_ID)
     return ordered
 
 
@@ -17431,7 +16973,7 @@ def send_developer_feedback_updates(
         persona_id = str(row.get("persona_id") or "")
         if not persona_id:
             if row.get("source") in {"tester", "internal_test"}:
-                persona_id = TREATMENT_TEST_AGENT_ID
+                persona_id = DEVELOPMENT_TEST_AGENT_ID
             else:
                 continue
         titles = [
@@ -17442,7 +16984,7 @@ def send_developer_feedback_updates(
         grouped.setdefault(persona_id, []).extend(title for title in titles if title)
     public_changes = [public_mail_text(item, "") for item in changes]
     public_changes = [item for item in public_changes if item][:3]
-    if not study_multi_agent_treatment_enabled(state):
+    if not multi_agent_workflow_enabled(state):
         personas = {
             str(item.get("id") or ""): item
             for item in state.get("personas") or []
@@ -17471,13 +17013,13 @@ def send_developer_feedback_updates(
                 persona_name=persona_name,
             )
         return
-    loop_num = treatment_loop_count(state) + (
-        1 if isinstance(state.get("pending_treatment_loop"), dict) else 0
+    loop_num = developmental_loop_count(state) + (
+        1 if isinstance(state.get("pending_developmental_loop"), dict) else 0
     )
     english = prompt_ui_locale(state) == "en"
-    for persona_id in _treatment_loop_participants(state, feedback):
+    for persona_id in _developmental_loop_users(state, feedback):
         titles = list(dict.fromkeys(grouped.get(persona_id) or []))[:3]
-        persona_name = _treatment_agent_display_name(state, persona_id)
+        persona_name = _developmental_agent_display_name(state, persona_id)
         mention = f"@{persona_name}"
         if titles:
             quoted = "、".join(titles)
@@ -17507,7 +17049,7 @@ def send_developer_feedback_updates(
         ).hexdigest()[:16]
         channel = (
             "experience:updates"
-            if persona_id == TREATMENT_TEST_AGENT_ID
+            if persona_id == DEVELOPMENT_TEST_AGENT_ID
             else f"experience:{persona_id}"
         )
         mailer.send(
@@ -17523,7 +17065,7 @@ def send_developer_feedback_updates(
         )
 
 
-def close_treatment_loop(
+def close_developmental_loop(
     state: dict[str, Any],
     mailer: Mailer | WebChannel,
     changes: list[Any],
@@ -17531,9 +17073,9 @@ def close_treatment_loop(
 ) -> bool:
     """Count one AppLooper loop only after feedback plus a unified developer reply."""
 
-    if not study_multi_agent_treatment_enabled(state):
+    if not multi_agent_workflow_enabled(state):
         return False
-    pending = state.get("pending_treatment_loop")
+    pending = state.get("pending_developmental_loop")
     if not isinstance(pending, dict):
         return False
     feedback = [
@@ -17542,22 +17084,22 @@ def close_treatment_loop(
         if isinstance(row, dict)
     ]
     send_developer_feedback_updates(state, mailer, feedback, changes, attachments)
-    next_loop = treatment_loop_count(state) + 1
+    next_loop = developmental_loop_count(state) + 1
     state["developmental_experience_rounds"] = next_loop
     state["round"] = next_loop
     reporting = progress_reporting_state(state)
     reporting["last_round"] = next_loop
     reporting["latest_round"] = next_loop
     maybe_flush_progress_digest(state, mailer, force=True)
-    state.pop("pending_treatment_loop", None)
+    state.pop("pending_developmental_loop", None)
     if finalize_stagnant_verify_as_reviewable_prototype(state):
-        event(state, "treatment_loop_closed_then_frozen", loop=next_loop)
+        event(state, "developmental_loop_closed_then_frozen", loop=next_loop)
         return True
     event(
         state,
-        "treatment_loop_closed",
+        "developmental_loop_closed",
         loop=next_loop,
-        agents=len(_treatment_loop_participants(state, feedback)),
+        agents=len(_developmental_loop_users(state, feedback)),
         feedback_rows=len(feedback),
     )
     return True
@@ -19794,448 +19336,18 @@ def enqueue_web_message(
     return True
 
 
-PROJECT_MANAGER_MENTION_ALIASES: dict[str, tuple[str, ...]] = {
-    "developer": ("研发智能体", "研发", "developer", "dev"),
-    "operations": ("运营智能体", "运营", "operations", "ops"),
-    "project_manager": (
-        "应用管理智能体",
-        "项目管理智能体",
-        "应用管理",
-        "项目管理",
-        "project manager",
-        "project_manager",
-        "pm",
-    ),
-}
-
-
-def parse_message_mention_target(message: dict[str, Any]) -> str:
-    """Best-effort recipient parsing for a main-channel message.
-
-    An explicit ``mention_target`` set by the client wins; otherwise a leading
-    ``@研发智能体`` / ``@运营智能体`` / ``@应用管理智能体`` (or English alias) is honoured.
-    Returns ``""`` when no recipient is indicated.
-    """
-
-    explicit = str(message.get("mention_target") or "").strip().lower()
-    if explicit in {"developer", "operations", "project_manager"}:
-        return explicit
-    body = str(message.get("body") or "")
-    match = re.match(r"^\s*@\s*([^\s，,：:@]+)", body)
-    if not match:
-        return ""
-    token = match.group(1).strip().lower()
-    if not token:
-        return ""
-    for agent, aliases in PROJECT_MANAGER_MENTION_ALIASES.items():
-        for alias in aliases:
-            alias_l = alias.lower()
-            if token == alias_l or token.startswith(alias_l) or alias_l.startswith(token):
-                return agent
-    return ""
-
-
-def main_channel_agent_for(message: dict[str, Any]) -> tuple[str, bool]:
-    """Return ``(agent, bypass_project_manager)`` for a main-channel message.
-
-    Messages the project manager injected when dispatching work carry
-    ``_pm_dispatch`` and go straight to the named downstream agent. A user
-    ``@研发智能体`` / ``@运营智能体`` mention bypasses the project manager too.
-    Everything else defaults to the project manager.
-    """
-
-    if message.get("_pm_dispatch"):
-        target = str(message.get("mention_target") or "developer").strip().lower()
-        if target not in {"developer", "operations"}:
-            target = "developer"
-        return target, True
-    target = parse_message_mention_target(message)
-    if target in {"developer", "operations"}:
-        return target, True
-    return "project_manager", False
-
-
-def inject_project_manager_dispatch(
-    state: dict[str, Any],
-    source_message: dict[str, Any],
-    source_message_id: str,
-    dispatch: list[dict[str, Any]],
-) -> int:
-    """Queue the downstream work the project manager relayed to dev / ops.
-
-    Each dispatched item carries the project manager's instruction plus the
-    user's original words, and is flagged ``_pm_dispatch`` so it bypasses the
-    project manager and is handled directly by the named agent. The synthetic
-    inbound row is marked hidden so it does not appear as a user message.
-    """
-
-    normalize_developer_message_queue(state)
-    queue = state.setdefault("developer_message_queue", [])
-    user_body = str(source_message.get("body") or "").strip()
-    owner_precheck = owner_feedback_precheck_for_message(state, source_message_id)
-    now = utcnow()
-    injected = 0
-    for index, row in enumerate(dispatch or []):
-        if not isinstance(row, dict):
-            continue
-        agent = str(row.get("agent") or "").strip().lower()
-        if agent not in {"developer", "operations"}:
-            continue
-        pm_message = str(row.get("message") or "").strip()
-        if not pm_message:
-            continue
-        dispatch_id = f"{source_message_id}:pm-dispatch:{agent}:{index}"
-        if queued_user_message(state, dispatch_id) is not None:
-            continue
-        combined = pm_message if not user_body else f"{pm_message}\n\n用户原话：{user_body}"
-        stored_message = {
-            "message_id": dispatch_id,
-            "body": combined[:12_000],
-            "channel": "main",
-            "created_at": now,
-            "mention_target": agent,
-            "_pm_dispatch": True,
-            "_owner_source_message": {
-                "message_id": source_message_id,
-                "body": user_body,
-                "attachments": list(source_message.get("attachments") or []),
-                "channel": "main",
-                "created_at": str(source_message.get("created_at") or now),
-            },
-        }
-        if owner_precheck is not None:
-            stored_message["_owner_feedback_precheck"] = dict(owner_precheck)
-        # Hide the relayed instruction from the visible conversation; only the
-        # downstream agent's reply should surface.
-        ledger_upsert(state, f"in:{dispatch_id}", pm_dispatch=True)
-        queue.append(
-            {
-                "message_id": dispatch_id,
-                "message": stored_message,
-                "user_message_state": "unread",
-                "enqueued_at": now,
-                "read_at": "",
-                "started_at": "",
-                "replied_at": "",
-                "boundary": "",
-                "attempts": 0,
-                # Non-empty so process_next_developer_message skips inbound triage.
-                "handling_status": "pm_dispatch",
-                "reply_draft": None,
-                "reply_message_id": "",
-                "last_error": "",
-                "waiting_context": {},
-                "reply_attempt_in_progress": False,
-                "reply_failure": False,
-                "reply_failure_error": "",
-                "reply_session_rotated_at": "",
-            }
-        )
-        injected += 1
-    if injected:
-        update_user_attention(state)
-        save_state(state)
-    return injected
-
-
-PROJECT_MANAGER_INTENT_VIEWS: dict[str, str] = {
-    "launch": "launch",
-    "configure_launch": "launch",
-    "update_target_users": "developer",
-    "configure_feedback": "operations",
-    "configure_analytics": "operations",
-    "configure_promotion": "operations",
-}
-
-
-def project_manager_launch_checklist(state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Surface the release self-verification checklist items, when available."""
-
-    model = state.get("operations") if isinstance(state.get("operations"), dict) else {}
-    review = model.get("release_review") if isinstance(model.get("release_review"), dict) else {}
-    items: list[dict[str, Any]] = []
-    for row in review.get("items") or []:
-        if not isinstance(row, dict):
-            continue
-        item_id = str(row.get("id") or "").strip()
-        label = str(row.get("label") or row.get("title") or row.get("text") or "").strip()
-        if not item_id or not label:
-            continue
-        items.append({"id": item_id, "label": label[:200], "checked": bool(row.get("checked"))})
-    return items[:20]
-
-
-def project_manager_intent_payload(state: dict[str, Any], intent: str) -> dict[str, Any]:
-    """Deterministically enrich an intent so the client can render an inline card.
-
-    The heavy configuration surfaces (launch, operations, target users) already
-    live in dedicated tabs; the card carries a plain-language summary plus the
-    navigation actions that open those surfaces from inside the conversation.
-    """
-
-    intent = str(intent or "none")
-    if intent == "none" or intent not in PROJECT_MANAGER_INTENTS:
-        return {}
-    view = PROJECT_MANAGER_INTENT_VIEWS.get(intent, "")
-    payload: dict[str, Any] = {"intent": intent, "view": view, "actions": []}
-    if intent in {"launch", "configure_launch"}:
-        checklist = project_manager_launch_checklist(state)
-        phase = str(state.get("phase") or "").upper()
-        ready = phase in {"DELIVERED", "OPERATE", "LAUNCHED"} or (
-            bool(checklist) and all(row["checked"] for row in checklist)
-        )
-        payload["checklist"] = checklist
-        payload["recommendation"] = "go" if ready else "hold"
-        payload["actions"] = [
-            {"kind": "open_trial", "label": "试用体验"},
-            {"kind": "open_launch", "label": "上线自验证与发布"},
-        ]
-    elif intent == "update_target_users":
-        payload["actions"] = [{"kind": "open_target_users", "label": "查看/更新目标用户"}]
-    elif intent == "configure_feedback":
-        payload["actions"] = [{"kind": "open_operations_feedback", "label": "配置用户反馈收集"}]
-    elif intent == "configure_analytics":
-        payload["actions"] = [{"kind": "open_operations_analytics", "label": "配置运营数据统计"}]
-    elif intent == "configure_promotion":
-        payload["actions"] = [{"kind": "open_operations_traffic", "label": "配置流量推广"}]
-    return payload
-
-
-# Guided, low-friction milestones the App-management agent raises on its own so
-# the mostly-autonomous build → iterate → operate loop still brings the user in
-# for the few important decisions. Each fires at most once, in priority order.
-PROJECT_MANAGER_NUDGES: list[dict[str, Any]] = [
-    {
-        "key": "repository",
-        "phases": {"DELIVER", "DELIVERED", "OPERATE", "LAUNCHED"},
-        "title": "是时候管理代码仓库了",
-        "body": "你的应用已经有了可用版本。建议现在把代码托管到你的代码仓库，方便留存和后续协作。需要我引导你连接吗？",
-        "intent": "manage_repository",
-        "actions": [{"kind": "open_repository", "label": "管理代码仓库"}],
-    },
-    {
-        "key": "launch_strategy",
-        "phases": {"DELIVERED", "OPERATE", "LAUNCHED"},
-        "title": "该配置上线策略了",
-        "body": "版本已经准备得差不多了。我们可以先确定用什么方式上线（面向谁、通过哪个平台）。要不要一起看看上线方式？",
-        "intent": "configure_launch",
-        "actions": [{"kind": "open_launch", "label": "配置上线方式"}],
-    },
-    {
-        "key": "launch",
-        "phases": {"DELIVERED", "OPERATE", "LAUNCHED"},
-        "title": "现在可以考虑上线了",
-        "body": "我建议先做一遍上线前自验证，并在“试用”里体验一下上线后的真实形态。确认没问题就可以发布。",
-        "intent": "launch",
-        "actions": [
-            {"kind": "open_trial", "label": "试用体验"},
-            {"kind": "open_launch", "label": "上线自验证与发布"},
-        ],
-    },
-    {
-        "key": "feedback",
-        "phases": {"OPERATE", "LAUNCHED"},
-        "title": "该适配用户反馈机制了",
-        "body": "应用面向真实用户后，收集反馈能帮你更快改进。要不要配置用户反馈的收集方式？",
-        "intent": "configure_feedback",
-        "actions": [{"kind": "open_operations_feedback", "label": "配置用户反馈收集"}],
-    },
-    {
-        "key": "analytics",
-        "phases": {"OPERATE", "LAUNCHED"},
-        "title": "该适配运营数据统计方式了",
-        "body": "有了真实使用后，运营数据能告诉你哪里受欢迎、哪里需要优化。要不要配置运营数据的统计方式？",
-        "intent": "configure_analytics",
-        "actions": [{"kind": "open_operations_analytics", "label": "配置运营数据统计"}],
-    },
-    {
-        "key": "promotion",
-        "phases": {"OPERATE", "LAUNCHED"},
-        "title": "该配置流量推广方式了",
-        "body": "如果想让更多人用到你的应用，可以配置推广/投流方式。需要我带你看看推广配置吗？",
-        "intent": "configure_promotion",
-        "actions": [{"kind": "open_operations_traffic", "label": "配置流量推广"}],
-    },
-]
-
-
-def project_manager_due_nudges(state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return the milestone nudges whose phase gate is met and not yet delivered."""
-
-    if state.get("channel") != "web":
-        return []
-    phase = str(state.get("phase") or "").upper()
-    delivered = {str(x) for x in state.get("pm_nudges_sent") or []}
-    due: list[dict[str, Any]] = []
-    for nudge in PROJECT_MANAGER_NUDGES:
-        if nudge["key"] in delivered:
-            continue
-        if phase in nudge["phases"]:
-            due.append(nudge)
-    return due
-
-
-def maybe_emit_project_manager_nudge(
-    state: dict[str, Any],
-    mailer: "Mailer | WebChannel",
-) -> bool:
-    """Emit at most one due milestone nudge as an App-management agent message."""
-
-    if not study_project_manager_enabled(state):
-        return False
-    due = project_manager_due_nudges(state)
-    if not due:
-        return False
-    # Repository guidance stays behind the repository-management feature flag.
-    due = [
-        nudge
-        for nudge in due
-        if nudge["key"] != "repository" or study_repository_management_enabled(state)
-    ]
-    if not due:
-        return False
-    nudge = due[0]
-    intent_payload = {
-        "intent": nudge["intent"],
-        "view": PROJECT_MANAGER_INTENT_VIEWS.get(nudge["intent"], ""),
-        "actions": list(nudge.get("actions") or []),
-    }
-    if nudge["intent"] in {"launch", "configure_launch"}:
-        checklist = project_manager_launch_checklist(state)
-        intent_payload["checklist"] = checklist
-        intent_payload["recommendation"] = (
-            "go" if checklist and all(row["checked"] for row in checklist) else "hold"
-        )
-    mailer.send(
-        state,
-        str(nudge["title"]),
-        str(nudge["body"]),
-        key=f"pm-nudge:{nudge['key']}",
-        channel="main",
-        actor="project_manager",
-        meta={"pm_intent": nudge["intent"], "pm_intent_payload": intent_payload},
-    )
-    state["pm_nudges_sent"] = list(dict.fromkeys([*(state.get("pm_nudges_sent") or []), nudge["key"]]))
-    event(state, "project_manager_nudge_emitted", nudge=nudge["key"], phase=str(state.get("phase") or ""))
-    save_state(state)
-    return True
-
-
-def project_manager_reply_draft(
-    state: dict[str, Any],
-    item: dict[str, Any],
-) -> dict[str, Any]:
-    """Default main-conversation handler: the App-management (PM) agent."""
-
-    message = item.get("message") if isinstance(item.get("message"), dict) else {}
-    owner_precheck = owner_feedback_precheck_for_message(
-        state, str(item.get("message_id") or message.get("message_id") or "")
-    )
-    payload = {
-        "task": (
-            "你是应用管理智能体（项目管理），是用户在“对话”页签的默认沟通对象。请用通俗、简短、"
-            "非技术的语言直接回应用户（reply_to_user），面向可能没有 IT 背景的用户。"
-            "识别用户意图并填入 intent：上线=launch；更新目标用户=update_target_users；"
-            "配置/查看上线方式=configure_launch；配置/查看用户反馈收集=configure_feedback；"
-            "配置/查看运营数据统计=configure_analytics；配置推广方式=configure_promotion；"
-            "其余=none。当用户的诉求需要研发或运营智能体真正动手时，用 dispatch 列出要转达的智能体"
-            "（developer 或 operations）以及你要转达给它的一句话（message，形如“用户希望…，请你…”）。"
-            "不要在 reply_to_user 里输出内部字段、会话标识或 schema。"
-        ),
-        "user_message": {
-            "body": str(message.get("body") or ""),
-            "attachments": list(message.get("attachments") or []),
-            "created_at": str(message.get("created_at") or item.get("enqueued_at") or ""),
-        },
-        "current_phase": str(state.get("phase") or ""),
-        "public_work_summary": dict(state.get("public_work_summary") or {}),
-        "intent_summary": state.get("intent", "")[:2_000] if isinstance(state.get("intent"), str) else "",
-        "owner_intent_precheck": owner_precheck,
-    }
-    result = call_claude(
-        state,
-        "project_manager",
-        prompt_json("统筹用户对话并分发", payload),
-        PROJECT_MANAGER_REPLY_SCHEMA,
-    )
-    intent = str(result.get("intent") or "none")
-    dispatch = [
-        {
-            "agent": str(row.get("agent") or "").strip().lower(),
-            "message": str(row.get("message") or "").strip(),
-        }
-        for row in (result.get("dispatch") or [])
-        if isinstance(row, dict)
-        and str(row.get("agent") or "").strip().lower() in {"developer", "operations"}
-        and str(row.get("message") or "").strip()
-    ]
-    body = str(result.get("reply_to_user") or "").strip() or "我已经收到你的消息，会帮你安排后续。"
-    return {
-        "title": "应用管理智能体",
-        "body": body,
-        "context_summary": str(result.get("context_summary") or "")[:2_000],
-        "actor": "project_manager",
-        "intent": intent,
-        "intent_payload": project_manager_intent_payload(state, intent),
-        "dispatch": dispatch,
-    }
-
-
-def operations_direct_reply_draft(
-    state: dict[str, Any],
-    item: dict[str, Any],
-) -> dict[str, Any]:
-    """Reply used when the user @-mentions the operations agent in the main chat."""
-
-    message = item.get("message") if isinstance(item.get("message"), dict) else {}
-    payload = {
-        "task": (
-            "用户在“对话”页签 @运营智能体，直接向你（只读运营智能体）提问。请基于已授权的运营数据"
-            "与配置，用通俗语言回答用户；没有数据来源时如实说明，不要编造指标。不要输出内部字段或会话标识。"
-        ),
-        "user_message": {
-            "body": str(message.get("body") or ""),
-            "created_at": str(message.get("created_at") or item.get("enqueued_at") or ""),
-        },
-        "operations_summary": json.dumps(state.get("operations") or {}, ensure_ascii=False, default=str)[:4_000],
-        "current_phase": str(state.get("phase") or ""),
-    }
-    result = call_claude(
-        state,
-        "operations",
-        prompt_json("运营智能体直接回复用户", payload),
-        OPERATIONS_DIRECT_REPLY_SCHEMA,
-    )
-    return {
-        "title": str(result.get("title") or "运营智能体回复"),
-        "body": str(result.get("body") or "我已根据已授权的运营数据处理你的问题。"),
-        "context_summary": str(result.get("context_summary") or "")[:2_000],
-        "actor": "operations",
-    }
-
-
 def developer_message_reply_draft(
     state: dict[str, Any],
     item: dict[str, Any],
 ) -> dict[str, Any]:
-    """Route a main-channel message to the right agent and return a reply draft.
-
-    By default the App-management (project manager) agent responds; explicit
-    ``@研发智能体`` / ``@运营智能体`` mentions and project-manager dispatch bypass it.
-    """
+    """Route every local main-channel message directly to the developer agent."""
 
     message = item.get("message") if isinstance(item.get("message"), dict) else {}
     ledger = state.get("conversation_ledger", {}).get(f"in:{item.get('message_id', '')}") or {}
     if ledger.get("runtime_install_items"):
-        # Runtime-install confirmations are part of the developer flow and never
-        # go through the project manager.
+        # Runtime-install confirmations remain part of the developer flow.
         title, body = runtime_install_decision_copy(ledger)
         return {"title": title, "body": body, "context_summary": body[:1_000], "actor": "developer"}
-    agent, _bypass = main_channel_agent_for(message)
-    if agent == "operations":
-        return operations_direct_reply_draft(state, item)
-    if agent == "project_manager":
-        return project_manager_reply_draft(state, item)
     return _developer_direct_reply_draft(state, item)
 
 
@@ -20396,21 +19508,7 @@ def process_next_developer_message(
             save_state(state)
         _, quoted_body = inbound_message_quote(message)
         reply_actor = str(draft.get("actor") or "developer")
-        default_reply_title = {
-            "project_manager": "应用管理智能体",
-            "operations": "运营智能体回复",
-        }.get(reply_actor, "研发智能体回复")
-        reply_meta: dict[str, Any] = {}
-        if draft.get("intent") and str(draft.get("intent")) != "none":
-            reply_meta["pm_intent"] = str(draft.get("intent"))
-            if isinstance(draft.get("intent_payload"), dict) and draft.get("intent_payload"):
-                reply_meta["pm_intent_payload"] = draft["intent_payload"]
-        if isinstance(draft.get("dispatch"), list) and draft.get("dispatch"):
-            reply_meta["pm_mentions"] = [
-                str(row.get("agent") or "")
-                for row in draft["dispatch"]
-                if isinstance(row, dict) and row.get("agent")
-            ]
+        default_reply_title = "研发智能体回复"
         reply_message_id = mailer.send(
             state,
             str(draft.get("title") or default_reply_title),
@@ -20420,17 +19518,8 @@ def process_next_developer_message(
             actor=reply_actor,
             in_reply_to_message_id=message_id,
             quoted_body=quoted_body,
-            meta=reply_meta or None,
+            meta=None,
         )
-        if isinstance(draft.get("dispatch"), list) and draft.get("dispatch"):
-            inject_project_manager_dispatch(state, message, message_id, draft["dispatch"])
-            # Dispatch normalization rebuilds every queue row as a fresh dict.
-            # Re-acquire the source turn before marking it replied; otherwise
-            # mutations below land on a stale object and the same PM turn is
-            # processed forever while its downstream developer work starves.
-            current_item = queued_user_message(state, message_id)
-            if current_item is not None:
-                item = current_item
         item["reply_message_id"] = str(reply_message_id or "")
         item["replied_at"] = utcnow()
         item["user_message_state"] = "replied"
@@ -20632,10 +19721,6 @@ def service_priority_web_messages(
         )
         gate = None
     processed = False if gate is not None else process_next_developer_message(state, mailer, boundary=boundary)
-    if not processed and gate is None:
-        # Surface at most one guided milestone from the App-management agent when
-        # no user turn is pending, so autonomous progress still loops the user in.
-        maybe_emit_project_manager_nudge(state, mailer)
     if enqueued or processed or gate_completed:
         event(
             state,
@@ -20683,7 +19768,7 @@ def planning_instruction(locale: str) -> str:
             "external_non_blocking only when final confirmation truly depends on an external "
             "server, app store, real device, or third-party environment; local preparation then "
             "waits for external verification without blocking internal testing. Do not create email "
-            "notification tasks for testers. All participant-facing generated text, including "
+            "notification tasks for testers. All user-facing generated text, including "
             "summary, segments, persona fields, task actions, and task titles, must be English."
         )
     return (
@@ -20702,7 +19787,7 @@ def planning_instruction(locale: str) -> str:
         "范围明确要求，否则不得加入统计、连续打卡、社交等功能探索。画像公开字段必须使用可直接展示"
         "的字符串或字符串数组（interest_profile 除外），task_script 每项只含 action，写用户能看懂"
         "的具体动作。tasks 必须是可执行 DAG，每项含 id,title,depends_on,guardrails,status=pending,"
-        "verification_mode。任务标题只写受试者能在界面上试到的功能点，禁止写入内部执行上下文"
+        "verification_mode。任务标题只写用户能在界面上试到的功能点，禁止写入内部执行上下文"
         "（P0/P1/P2/P3、端口、manifest-only、凭据、Experience Twin、CUJ 编号或英文变量名）。"
         "能由本地代码、自动化测试或 Experience Twin 验收的任务使用 candidate；"
         "必须依赖外部服务器、应用商店、真实设备或第三方环境才能最终确认的任务使用 "
@@ -20713,7 +19798,7 @@ def planning_instruction(locale: str) -> str:
 
 
 def validate_plan_locale(plan: dict[str, Any], locale: str) -> tuple[bool, str]:
-    """Reject system-generated Chinese that would leak into an English study UI."""
+    """Reject system-generated Chinese that would leak into an English application UI."""
 
     if app_i18n.normalize_locale(locale) != app_i18n.EN:
         return True, ""
@@ -20742,7 +19827,7 @@ def validate_plan_locale(plan: dict[str, Any], locale: str) -> tuple[bool, str]:
         if isinstance(task, dict)
     )
     if app_i18n.contains_cjk(visible):
-        return False, "English UI plan contains non-English participant-facing generated text"
+        return False, "English UI plan contains non-English user-facing generated text"
     return True, ""
 
 
@@ -20869,7 +19954,7 @@ def phase_plan(state: dict[str, Any], mailer: Mailer) -> None:
             "the user's description and inspect age, region, life or role stage, technical skill, "
             "device, motivation, constraints, scenario, habits, and the complete task script. Flag "
             "any persona action that does not directly test an explicit or frozen requirement or "
-            "the shared CUJ as a persona_issue. All participant-facing generated text must be "
+            "the shared CUJ as a persona_issue. All user-facing generated text must be "
             "English. passed may be true only when every missing/issue array is empty. Do not edit code."
             if ui_locale == app_i18n.EN else
             "独立审计显式护栏、画像覆盖和画像任务范围，不沿用规划者的自我声明。先逐句核对 intent 和现有 active guardrails，所有仍有效的用户显式需求都必须被 proposed_plan.guardrails 或 active_guardrails 原子覆盖，否则写入 missing_explicit_requirements。再根据用户明确描述的群体推导必要细分，检查年龄、地域、身份阶段、技术熟练度、设备、动机、限制、场景、习惯爱好和完整任务脚本。任何不能直接验证显式或冻结需求、或共享 CUJ 的画像动作都必须写入 persona_issues。所有面向参与者展示的生成文本必须尽量使用中文。只有所有 missing/issue 数组为空时 passed=true。不要修改代码。"
@@ -20956,9 +20041,9 @@ def phase_plan(state: dict[str, Any], mailer: Mailer) -> None:
     personas = []
     for index, raw in enumerate(plan["personas"], 1):
         personas.append(finalize_persona(dict(raw), index=index))
-    personas = materialize_study_persona_cohort(state, personas, generate=True)
-    if study_persona_cohort_is_current(state, personas) or len(personas) > len(plan["personas"]):
-        state["study_persona_cohort_version"] = STUDY_PERSONA_COHORT_VERSION
+    personas = materialize_persona_cohort(state, personas, generate=True)
+    if generated_persona_cohort_is_current(state, personas) or len(personas) > len(plan["personas"]):
+        state["generated_persona_cohort_version"] = GENERATED_PERSONA_COHORT_VERSION
     for persona in personas:
         session_for(state, persona.get("_session_key") or f"experience:{persona['id']}")
     state["personas"] = personas
@@ -21402,18 +20487,18 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
             state["triaged_feedback_id"] = feedback_fingerprint(state)
             save_state(state)
             if not feedback:
-                if study_multi_agent_treatment_enabled(state) and isinstance(
-                    state.get("pending_treatment_loop"), dict
+                if multi_agent_workflow_enabled(state) and isinstance(
+                    state.get("pending_developmental_loop"), dict
                 ):
                     try:
-                        close_treatment_loop(state, mailer, [], [])
+                        close_developmental_loop(state, mailer, [], [])
                     except Exception as exc:
                         event(
                             state,
                             "developer_feedback_update_failed",
                             error=f"{type(exc).__name__}: {exc}"[:500],
                         )
-                    if treatment_loop_count(state) < developmental_experience_round_limit(state):
+                    if developmental_loop_count(state) < developmental_experience_round_limit(state):
                         if schedule_developmental_experience(
                             state,
                             mailer,
@@ -21431,8 +20516,8 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
                 return
     if service_priority_web_messages(state, mailer, boundary="feedback_triage_complete"):
         return
-    if study_multi_agent_treatment_enabled(state):
-        cycle_rounds = treatment_loop_count(state)
+    if multi_agent_workflow_enabled(state):
+        cycle_rounds = developmental_loop_count(state)
     else:
         cycle_rounds = int(state["round"]) - int(state.get("cycle_started_round", 0))
     if cycle_rounds >= int(state["max_rounds"]):
@@ -21574,12 +20659,12 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
         )
     else:
         state.pop("last_experience_twin_warning", None)
-    if not study_multi_agent_treatment_enabled(state):
+    if not multi_agent_workflow_enabled(state):
         state["round"] = next_round
     state["last_developer"] = result
     if prepared_twin is not None:
         state["experience_twin"] = prepared_twin
-        sync_paired_study_default_surface_records(state, prepared_twin)
+        sync_default_web_surface_records(state, prepared_twin)
     tasks_by_id = {str(x.get("id")): x for x in state.get("tasks") or [] if isinstance(x, dict)}
     claimed = normalize_completed_task_claims(result.get("completed_tasks"), set(tasks_by_id))
     allowed_new_claims = {str(current_task.get("id") or "")} if current_task.get("kind") == "task" else set()
@@ -21680,17 +20765,17 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
             list(result.get("changes") or []),
         ),
     )
-    treatment = study_multi_agent_treatment_enabled(state)
+    multi_agent = multi_agent_workflow_enabled(state)
     closed_loop = False
-    if treatment and isinstance(state.get("pending_treatment_loop"), dict):
+    if multi_agent and isinstance(state.get("pending_developmental_loop"), dict):
         try:
-            closed_loop = close_treatment_loop(
+            closed_loop = close_developmental_loop(
                 state, mailer, list(result.get("changes") or []), shots
             )
         except Exception as exc:
             event(state, "developer_feedback_update_failed", error=f"{type(exc).__name__}: {exc}"[:500])
     loop_limit = developmental_experience_round_limit(state)
-    if treatment and treatment_loop_count(state) >= loop_limit:
+    if multi_agent and developmental_loop_count(state) >= loop_limit:
         developmental_scheduled = False
         if state.get("strict_round_limit"):
             state["strict_round_limit_reached"] = True
@@ -21698,7 +20783,7 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
             event(
                 state,
                 "strict_round_limit_reached",
-                round=treatment_loop_count(state),
+                round=developmental_loop_count(state),
                 limit=loop_limit,
             )
             finalize_strict_round_limit_as_reviewable_prototype(state)
@@ -21711,7 +20796,7 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
             current_task=current_task,
         )
         if not developmental_scheduled:
-            if treatment:
+            if multi_agent:
                 state["phase"] = (
                     "REVIEW" if result.get("ready_for_review") and all_tasks_done else "DELIVER"
                 )
@@ -21736,16 +20821,16 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
     elif not developmental_scheduled:
         set_public_work_summary(
             state,
-            kind="developing" if not treatment else "delivered",
+            kind="developing" if not multi_agent else "delivered",
             current=f"已完成：{task_title}",
             next_step=(
                 "优先读取你的新消息，然后开始下一项研发任务"
-                if not treatment
+                if not multi_agent
                 else "已完成本轮反馈闭环，不再空转内部开发轮"
             ),
         )
-    leftover_pending = isinstance(state.get("pending_treatment_loop"), dict)
-    if not closed_loop and (not treatment or leftover_pending):
+    leftover_pending = isinstance(state.get("pending_developmental_loop"), dict)
+    if not closed_loop and (not multi_agent or leftover_pending):
         try:
             send_developer_feedback_updates(
                 state, mailer, feedback_for_updates, list(result.get("changes") or []), shots
@@ -21759,7 +20844,7 @@ def phase_develop(state: dict[str, Any], mailer: Mailer) -> None:
             candidate_id=str((state.get("developmental_experience") or {}).get("candidate_id") or ""),
             task_id=str(current_task.get("id") or ""),
         )
-    if not treatment:
+    if not multi_agent:
         maybe_flush_progress_digest(state, mailer)
     if finalize_stagnant_verify_as_reviewable_prototype(state):
         event(state, "development_round", round=state["round"], ready=bool(result.get("ready_for_review")))
@@ -21956,16 +21041,16 @@ def blinded_release_review_payload(
     candidate_id: str,
     guardrail_set_id: str,
 ) -> dict[str, Any]:
-    """Build the only model-visible input used for study release review.
+    """Build the only model-visible input used for independent candidate review.
 
-    No condition identifier, A/B label, developer/virtual-user narrative,
+    No private workflow metadata, developer/virtual-user narrative,
     conversation, progress log or prior verdict is included.  The evaluator can
     inspect the final workspace, run the same declared-test selection policy and
     check the frozen requirements.  The shared CUJ is included as a frozen test
     specification but is executed later through real browser Computer Use.
     """
 
-    protocol = normalize_study_evaluation_protocol(state.get("study_evaluation_protocol"))
+    protocol = normalize_release_evaluation_protocol(state.get("release_evaluation_protocol"))
     regression_policy = (
         dict(protocol["regression_policy"])
         if protocol is not None
@@ -21984,13 +21069,13 @@ def blinded_release_review_payload(
     return {
         "task": (
             "Blindly evaluate the final application artifact. Do not inspect or infer "
-            "the workflow condition, A/B label, conversations, progress messages, "
+            "the private workflow metadata, conversations, progress messages, "
             "developer summaries, virtual-user narratives, or prior verdicts. Inspect "
             "only product source/runtime files needed to test the final artifact. Run "
             "the project-declared regression tests selected by the frozen common policy, "
             "check every frozen requirement, and return only the structured review result."
         ),
-        "evaluation_protocol_version": STUDY_EVALUATION_PROTOCOL_VERSION,
+        "evaluation_protocol_version": RELEASE_EVALUATION_PROTOCOL_VERSION,
         "candidate_artifact": {"id": candidate_id},
         "guardrail_set_id": guardrail_set_id,
         "frozen_requirements": [
@@ -22067,13 +21152,6 @@ def standardized_issue_counts(state: dict[str, Any]) -> dict[str, int]:
         for issue in row.get("issues") or []:
             if isinstance(issue, dict):
                 add(issue)
-    operations, _ = _read_operations_model(state)
-    for theme in operations.get("eufr_themes") or []:
-        if not isinstance(theme, dict):
-            continue
-        if str(theme.get("status") or "").casefold() in {"resolved", "rejected", "deferred"}:
-            continue
-        add(theme, str(theme.get("priority") or ""))
     return counts
 
 
@@ -22105,7 +21183,7 @@ def standardized_release_gate_snapshot(state: dict[str, Any]) -> dict[str, Any]:
     )
     cuj = state.get("cuj_gate") if isinstance(state.get("cuj_gate"), dict) else {}
     return {
-        "protocol_version": STUDY_EVALUATION_PROTOCOL_VERSION,
+        "protocol_version": RELEASE_EVALUATION_PROTOCOL_VERSION,
         "candidate_artifact_id": candidate_fingerprint(state),
         "regression": {
             "ran": regression.get("ran") is True,
@@ -22209,7 +21287,7 @@ def run_basic_host_regression(
 
     workspace = Path(str(state.get("workspace") or ".")).expanduser().resolve()
     commands = discover_basic_regression_commands(state)
-    protocol = normalize_study_evaluation_protocol(state.get("study_evaluation_protocol"))
+    protocol = normalize_release_evaluation_protocol(state.get("release_evaluation_protocol"))
     require_tests = True
     if protocol is not None:
         require_tests = bool(
@@ -22368,7 +21446,7 @@ def apply_release_not_releasable(
     readiness["evaluated_at"] = utcnow()
     readiness["evaluation_layer"] = str(layer or "deep")[:40]
     with contextlib.suppress(TypeError, ValueError, OverflowError):
-        if study_multi_agent_treatment_enabled(state):
+        if multi_agent_workflow_enabled(state):
             readiness["last_release_fail_round"] = max(
                 1, int(state.get("developmental_experience_rounds") or 0) or 1
             )
@@ -22392,10 +21470,9 @@ def apply_release_not_releasable(
         "layer": layer,
     }
     evaluation_contract = {
-        **(contract or study_evaluator_contract(state)),
-        "protocol_version": STUDY_EVALUATION_PROTOCOL_VERSION,
+        **(contract or release_evaluator_contract(state)),
+        "protocol_version": RELEASE_EVALUATION_PROTOCOL_VERSION,
         "blinded": True,
-        "attempt_budget_enforced": False,
         "evaluation_layer": layer,
     }
     if attempt is not None:
@@ -22455,7 +21532,7 @@ def apply_release_not_releasable(
     )
     # Force another tester+VU pass while budget remains, including re-checking
     # the same candidate fingerprint after a failed release gate.
-    if mailer is not None and study_multi_agent_treatment_enabled(state):
+    if mailer is not None and multi_agent_workflow_enabled(state):
         trigger = (
             "release_basic_failed" if str(layer or "").casefold() == "basic" else "release_deep_failed"
         )
@@ -22534,8 +21611,8 @@ def experience_wave_cohort_key(
 ) -> str:
     """Keep one pair for the current wave; pick a new pair on the next loop."""
 
-    if study_multi_agent_treatment_enabled(state):
-        return f"{candidate}:{guardrails_id}:{treatment_loop_count(state)}"
+    if multi_agent_workflow_enabled(state):
+        return f"{candidate}:{guardrails_id}:{developmental_loop_count(state)}"
     return f"{candidate}:{guardrails_id}"
 
 
@@ -22585,17 +21662,17 @@ def prepare_internal_test_cohort(
         state["personas"] = personas
     if not personas:
         return []
-    treatment = study_multi_agent_treatment_enabled(state)
+    multi_agent = multi_agent_workflow_enabled(state)
     key = experience_wave_cohort_key(state, candidate, guardrails_id)
     existing = state.get("internal_test_cohort")
     wave_size = min(
-        treatment_experience_wave_size(state) if treatment else INTERNAL_TEST_COHORT_SIZE,
+        developmental_experience_wave_size(state) if multi_agent else INTERNAL_TEST_COHORT_SIZE,
         len(personas),
     )
     if isinstance(existing, dict) and existing.get("key") == key:
         selected_ids = {str(item) for item in existing.get("persona_ids") or []}
         selected = [persona for persona in personas if str(persona.get("id")) in selected_ids]
-        if selected and (not treatment or len(selected) <= wave_size):
+        if selected and (not multi_agent or len(selected) <= wave_size):
             return selected
 
     by_id = {str(persona.get("id")): persona for persona in personas}
@@ -22604,12 +21681,12 @@ def prepare_internal_test_cohort(
         persona = by_id.get(str(persona_id))
         if persona is not None and persona not in selected:
             selected.append(persona)
-        if treatment and len(selected) >= wave_size:
+        if multi_agent and len(selected) >= wave_size:
             break
-    # Finding-to-fix replay may expand the baseline cohort. Treatment draws a
+    # Finding-to-fix replay may expand the baseline cohort. The multi-agent workflow draws a
     # new random pair each loop so the named pool actually rotates.
-    target_count = wave_size if treatment else max(wave_size, len(selected))
-    if treatment:
+    target_count = wave_size if multi_agent else max(wave_size, len(selected))
+    if multi_agent:
         previous_ids = {
             str(item)
             for item in ((state.get("last_internal_test_cohort") or {}).get("persona_ids") or [])
@@ -22679,7 +21756,7 @@ def publish_internal_test_update(
         if isinstance(task, dict) and task_verification_mode(task) == "external_non_blocking"
     ]
     prior_handoffs = state.get("agent_feedback_handoffs")
-    closed_loops = treatment_loop_count(state)
+    closed_loops = developmental_loop_count(state)
     first_delivery = closed_loops <= 0 and (
         not isinstance(prior_handoffs, dict) or not prior_handoffs
     )
@@ -22736,7 +21813,7 @@ def agent_feedback_handoff_ready(
     )
 
 
-def treatment_delivery_cycle_open(state: dict[str, Any]) -> bool:
+def developmental_delivery_cycle_open(state: dict[str, Any]) -> bool:
     """True while a delivered version still owes tester + virtual-user feedback.
 
     The next "第 N 轮更新已交付" announcement must wait until the current
@@ -22744,9 +21821,9 @@ def treatment_delivery_cycle_open(state: dict[str, Any]) -> bool:
     feedback, and the developer has closed that pending loop.
     """
 
-    if not study_multi_agent_treatment_enabled(state):
+    if not multi_agent_workflow_enabled(state):
         return False
-    if isinstance(state.get("pending_treatment_loop"), dict):
+    if isinstance(state.get("pending_developmental_loop"), dict):
         return True
     active = state.get("developmental_experience")
     return bool(isinstance(active, dict) and str(active.get("candidate_id") or "").strip())
@@ -22760,15 +21837,15 @@ def schedule_developmental_experience(
     current_task: dict[str, Any] | None = None,
     developer_error: str = "",
 ) -> bool:
-    """Route one runnable treatment checkpoint through tester + personas.
+    """Route one runnable multi-agent checkpoint through tester + personas.
 
     This is deliberately separate from the frozen release evaluator. It may
     produce development feedback, but it can never mark a candidate releasable.
     """
 
-    if not study_multi_agent_treatment_enabled(state):
+    if not multi_agent_workflow_enabled(state):
         return False
-    if treatment_delivery_cycle_open(state):
+    if developmental_delivery_cycle_open(state):
         active = state.get("developmental_experience")
         if isinstance(active, dict) and str(active.get("candidate_id") or "").strip():
             if mailer is not None and not agent_feedback_handoff_ready(
@@ -22952,7 +22029,7 @@ def run_developmental_test_agent(
     )
 
 
-def treatment_experience_tester_slot(
+def developmental_experience_tester_slot(
     state: dict[str, Any],
     *,
     candidate: str,
@@ -22961,7 +22038,7 @@ def treatment_experience_tester_slot(
 ) -> dict[str, Any] | None:
     """Reuse the developmental tester slot, or create one for review-phase loops."""
 
-    if not study_multi_agent_treatment_enabled(state):
+    if not multi_agent_workflow_enabled(state):
         return None
     if developmental_descriptor is not None:
         return developmental_descriptor
@@ -22978,7 +22055,7 @@ def treatment_experience_tester_slot(
     return slot
 
 
-def treatment_tester_feedback_row(
+def developmental_tester_feedback_row(
     issues: list[dict[str, Any]],
     *,
     candidate: str,
@@ -23043,7 +22120,7 @@ def developmental_tester_outbox_key(candidate: str) -> str:
     return f"developmental-tester:{str(candidate or '').strip()}"
 
 
-def treatment_tester_bubble_published(
+def developmental_tester_bubble_published(
     state: dict[str, Any],
     candidate: str,
     tester_descriptor: dict[str, Any] | None = None,
@@ -23190,16 +22267,16 @@ def phase_review(state: dict[str, Any], mailer: Mailer | WebChannel) -> None:
     sync_guardrail_mirror(state)
     candidate = candidate_fingerprint(state)
     guardrails_id = guardrail_fingerprint(state)
-    preview_port = study_preview_port(state)
-    if study_multi_agent_treatment_enabled(state) and preview_port is not None:
+    preview_port = configured_preview_port(state)
+    if multi_agent_workflow_enabled(state) and preview_port is not None:
         managed_preview_ready = ensure_review_preview(state)
         if not managed_preview_ready:
-            recovered = recover_study_preview_checkpoint(state)
+            recovered = recover_preview_checkpoint(state)
             if recovered:
                 managed_preview_ready = ensure_review_preview(state)
         if not managed_preview_ready:
             # Independent evaluation is meaningful only against the runnable
-            # candidate that participants and virtual users will experience.
+            # candidate that users and virtual users will experience.
             # Preserve this checkpoint while the host-owned preview recovers.
             # Sending the state back to development here made the coding agent
             # start a short-lived server, increment the round, exit, and repeat
@@ -23349,7 +22426,7 @@ def phase_review(state: dict[str, Any], mailer: Mailer | WebChannel) -> None:
         candidate_id=candidate,
         guardrail_set_id=guardrails_id,
     )
-    contract = study_evaluator_contract(state)
+    contract = release_evaluator_contract(state)
     attempt_key = f"{candidate}:{guardrails_id}:{contract['prompt_id']}"
     state["release_evaluator_active_attempt_key"] = attempt_key
     attempts = state.setdefault("release_evaluator_attempts", {})
@@ -23361,9 +22438,8 @@ def phase_review(state: dict[str, Any], mailer: Mailer | WebChannel) -> None:
     attempt = int(attempts.get(attempt_key) or 0) + 1
     state["release_evaluator_contract"] = {
         **contract,
-        "protocol_version": STUDY_EVALUATION_PROTOCOL_VERSION,
+        "protocol_version": RELEASE_EVALUATION_PROTOCOL_VERSION,
         "blinded": True,
-        "attempt_budget_enforced": False,
         "evaluation_layer": "deep",
         "basic_check": {
             "passed": True,
@@ -23374,12 +22450,11 @@ def phase_review(state: dict[str, Any], mailer: Mailer | WebChannel) -> None:
         state,
         "release_evaluator_started",
         candidate_id=candidate,
-        protocol_version=STUDY_EVALUATION_PROTOCOL_VERSION,
+        protocol_version=RELEASE_EVALUATION_PROTOCOL_VERSION,
         prompt_id=contract["prompt_id"],
         model=contract["model"],
         temperature=contract["temperature"],
         attempt=attempt,
-        attempt_budget_enforced=False,
         evaluation_layer="deep",
         timeout_seconds=agent_timeout_seconds_for_role(state, "reviewer"),
     )
@@ -23447,7 +22522,6 @@ def phase_review(state: dict[str, Any], mailer: Mailer | WebChannel) -> None:
                     attempt=attempt,
                     transport_attempt=transport_attempt,
                     transport_attempt_limit=retry_limit,
-                    attempt_budget_enforced=False,
                     error=f"{type(exc).__name__}: {exc}"[:500],
                 )
                 save_state(state)
@@ -23531,10 +22605,9 @@ def phase_review(state: dict[str, Any], mailer: Mailer | WebChannel) -> None:
         "evaluation_layer": "deep",
         "evaluation_contract": {
             **contract,
-            "protocol_version": STUDY_EVALUATION_PROTOCOL_VERSION,
+            "protocol_version": RELEASE_EVALUATION_PROTOCOL_VERSION,
             "blinded": True,
             "attempt": attempt,
-            "attempt_budget_enforced": False,
             "evaluation_layer": "deep",
         },
     }
@@ -23547,48 +22620,6 @@ def phase_review(state: dict[str, Any], mailer: Mailer | WebChannel) -> None:
             candidate_id=candidate,
             reason="independent_evaluation_passed",
         )
-        if not study_multi_agent_treatment_enabled(state):
-            # Claude evaluator-loop baseline: keep the same blinded evaluator,
-            # regression policy and runnable preview, but do not execute any
-            # AppLooper-only virtual-user, owner-intent or internal-test stage.
-            state["last_experience"] = []
-            state["experience_candidate"] = candidate
-            state["experience_guardrail_set"] = guardrails_id
-            state["cuj_gate"] = {
-                "required": False,
-                "passed": True,
-                "baseline_skipped": True,
-                "candidate_id": candidate,
-                "guardrail_set_id": guardrails_id,
-            }
-            state["phase"] = "DELIVER"
-            set_public_work_summary(
-                state,
-                kind="reviewing",
-                current=app_i18n.pair(
-                    "独立验收与回归测试已通过",
-                    "Independent evaluation and regression tests passed",
-                ),
-                next_step=app_i18n.pair(
-                    "整理可验收的候选版本",
-                    "Prepare the candidate for participant review",
-                ),
-            )
-            event(
-                state,
-                "baseline_multi_agent_stage_skipped",
-                candidate_id=candidate,
-                condition=STUDY_BASELINE_CONDITION,
-            )
-            event(
-                state,
-                "candidate_review",
-                candidate_id=candidate,
-                passed=passed,
-                failures=failures,
-            )
-            save_state(state)
-            return
         cohort = prepare_internal_test_cohort(state, candidate, guardrails_id)
         try:
             handoff_message_id = publish_internal_test_update(
@@ -23673,7 +22704,7 @@ def computer_use_verified(state: dict[str, Any], result: dict[str, Any]) -> bool
 def autonomous_experience_round_limit() -> int:
     """Bound open-ended persona ideation after evidence-backed core-task checks.
 
-    The limit is shared by every study condition.  It is deliberately separate
+    The limit is shared by every application workflow. It is deliberately separate
     from ``max_rounds``: the latter protects the whole development cycle, while
     this bound prevents an otherwise successful UI test from generating an
     endless sequence of optional product ideas.
@@ -24533,22 +23564,6 @@ def schedule_replay(state: dict[str, Any], candidate: str, guardrails_id: str) -
     replay["candidate"], replay["guardrails"] = candidate, guardrails_id
 
 
-def study_stop_after_first_acceptance() -> bool:
-    """Whether this tenant stops autonomous replay at the study acceptance boundary."""
-
-    return str(os.environ.get("WF_STUDY_STOP_AFTER_FIRST_ACCEPTANCE") or "").strip().casefold() in {
-        "1", "true", "yes", "on",
-    }
-
-
-def study_requires_computer_use_evidence() -> bool:
-    """Whether infrastructure deferral must remain a blocker in study tenants."""
-
-    return str(os.environ.get("WF_STUDY_REQUIRE_COMPUTER_USE_EVIDENCE") or "").strip().casefold() in {
-        "1", "true", "yes", "on",
-    }
-
-
 def replay_due(state: dict[str, Any]) -> bool:
     next_at = replay_state(state).get("next_at")
     return bool(state.get("phase") == "DELIVERED" and next_at and time.time() >= float(next_at))
@@ -24591,7 +23606,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
                 next_step="重新验收通过后再开始体验测试",
             )
             return
-    if study_multi_agent_treatment_enabled(state) and not agent_feedback_handoff_ready(
+    if multi_agent_workflow_enabled(state) and not agent_feedback_handoff_ready(
         state, str(validated or ""), str(validated_guardrails or "")
     ):
         cohort = prepare_internal_test_cohort(
@@ -24636,8 +23651,8 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         # virtual-user work in this same phase. The handoff is durable and has
         # a message id, so later feedback cannot appear before it in the chat.
         save_state(state)
-    if should_expand_study_persona_cohort(state):
-        generated = materialize_study_persona_cohort(state, generate=True)
+    if should_expand_generated_persona_cohort(state):
+        generated = materialize_persona_cohort(state, generate=True)
         if generated and generated != state.get("personas"):
             state["personas"] = generated
             for persona in generated:
@@ -24654,7 +23669,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         if isinstance(row, dict)
         and (not developmental or str(row.get("candidate_id") or "") == str(validated))
     ]
-    tester_descriptor = treatment_experience_tester_slot(
+    tester_descriptor = developmental_experience_tester_slot(
         state,
         candidate=str(validated or ""),
         guardrails=str(validated_guardrails or ""),
@@ -24674,7 +23689,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
             for result in previous
         )
     )
-    if previous_environment_only and not developmental and not study_multi_agent_treatment_enabled(state):
+    if previous_environment_only and not developmental and not multi_agent_workflow_enabled(state):
         state["experience_candidate"] = validated
         state["experience_guardrail_set"] = validated_guardrails
         state["experience_verification_deferred"] = {
@@ -24712,7 +23727,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         unchanged=True,
         cuj_gate=previous_cuj_gate,
     )
-    if previous_bounded_delivery and not developmental and not study_multi_agent_treatment_enabled(state):
+    if previous_bounded_delivery and not developmental and not multi_agent_workflow_enabled(state):
         state["experience_candidate"] = validated
         state["experience_guardrail_set"] = validated_guardrails
         state["experience_verification_deferred"] = {
@@ -25026,7 +24041,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         queue_item["status"] = "running"
         queue_item["started_at"] = str(queue_item.get("started_at") or utcnow())
         pending_runs.append((persona_index, persona, persona_script))
-    need_tester = tester_descriptor is not None and not treatment_tester_bubble_published(
+    need_tester = tester_descriptor is not None and not developmental_tester_bubble_published(
         state, str(validated or ""), tester_descriptor
     )
     if pending_runs or need_tester:
@@ -25140,8 +24155,8 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
             save_state(state)
 
         close_after = (
-            min(treatment_experience_wave_close_after(state), len(pending_runs))
-            if study_multi_agent_treatment_enabled(state) and pending_runs
+            min(developmental_experience_wave_close_after(state), len(pending_runs))
+            if multi_agent_workflow_enabled(state) and pending_runs
             else len(pending_runs)
         )
         finished_vu = 0
@@ -25262,8 +24277,8 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         event(state, "persona_initial_state_adjusted", persona_ids=adjusted)
     if (
         tester_descriptor is not None
-        and study_multi_agent_treatment_enabled(state)
-        and not treatment_tester_bubble_published(state, str(validated or ""), tester_descriptor)
+        and multi_agent_workflow_enabled(state)
+        and not developmental_tester_bubble_published(state, str(validated or ""), tester_descriptor)
     ):
         state["phase"] = "EXPERIENCE"
         if developmental:
@@ -25324,7 +24339,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         if developmental_tester_issues:
             developmental_feedback.insert(
                 0,
-                treatment_tester_feedback_row(
+                developmental_tester_feedback_row(
                     developmental_tester_issues,
                     candidate=validated,
                     guardrails=validated_guardrails,
@@ -25359,12 +24374,12 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         if str(validated) not in completed:
             completed.append(str(validated))
         state["developmental_experience_candidates"] = completed[-20:]
-        agent_ids = [TREATMENT_TEST_AGENT_ID]
+        agent_ids = [DEVELOPMENT_TEST_AGENT_ID]
         for row in results:
             persona_id = str((row or {}).get("persona_id") or "").strip()
             if persona_id and persona_id not in agent_ids:
                 agent_ids.append(persona_id)
-        state["pending_treatment_loop"] = {
+        state["pending_developmental_loop"] = {
             "candidate_id": validated,
             "guardrail_set_id": validated_guardrails,
             "agent_ids": agent_ids,
@@ -25493,7 +24508,7 @@ def phase_experience(state: dict[str, Any], mailer: Mailer) -> None:
         if developmental_tester_issues:
             state["feedback"].insert(
                 0,
-                treatment_tester_feedback_row(
+                developmental_tester_feedback_row(
                     developmental_tester_issues,
                     candidate=validated,
                     guardrails=validated_guardrails,
@@ -25873,7 +24888,7 @@ def phase_replay(state: dict[str, Any], mailer: Mailer) -> None:
 
 
 def unresolved_release_feedback(state: dict[str, Any]) -> list[str]:
-    """Return participant-visible feedback sources that still need resolution."""
+    """Return user-visible feedback sources that still need resolution."""
 
     normalize_developer_message_queue(state)
     unresolved: list[str] = []
@@ -25882,7 +24897,7 @@ def unresolved_release_feedback(state: dict[str, Any]) -> list[str]:
         and str(row.get("user_message_state") or "unread") != "replied"
         for row in state.get("developer_message_queue") or []
     ):
-        unresolved.append("participant_message")
+        unresolved.append("user_message")
     if any(
         isinstance(row, dict)
         and str(row.get("owner_acceptance_status") or "ready")
@@ -25971,7 +24986,7 @@ def release_agent_satisfaction(
     only when the owner actually gave feedback.
     """
 
-    multi = study_multi_agent_treatment_enabled(state)
+    multi = multi_agent_workflow_enabled(state)
     developer_ready = developer_considers_publishable(state)
     developer = {
         "applicable": True,
@@ -26041,13 +25056,13 @@ def release_agent_satisfaction(
 
 def phase_deliver(state: dict[str, Any], mailer: Mailer) -> None:
     sync_guardrail_mirror(state)
-    multi_agent_treatment = study_multi_agent_treatment_enabled(state)
+    multi_agent_enabled = multi_agent_workflow_enabled(state)
     candidate = candidate_fingerprint(state)
     validation = state.get("validation") or {}
     experience = state.get("last_experience") or []
     experience_deferred = deferred_experience_verification_matches(state, candidate)
-    require_computer_use = study_requires_computer_use_evidence()
-    experience_ready = (not multi_agent_treatment) or (
+    require_computer_use = False
+    experience_ready = (not multi_agent_enabled) or (
         bool(experience)
         and (
             all(experience_passed(state, result) for result in experience)
@@ -26055,7 +25070,7 @@ def phase_deliver(state: dict[str, Any], mailer: Mailer) -> None:
         )
     )
     cuj_ready = (
-        not multi_agent_treatment
+        not multi_agent_enabled
         or cuj_gate_passed(state)
         or (experience_deferred and not require_computer_use)
     )
@@ -26090,7 +25105,7 @@ def phase_deliver(state: dict[str, Any], mailer: Mailer) -> None:
         unresolved_feedback=list(unresolved_feedback),
         p0_count=int(standardized_issue_count.get("P0") or 0),
     )
-    # Study release gate: agent release judgments are authoritative.
+    # Release gate: agent release judgments are authoritative.
     # Standardized checks remain evidence for AppLooper test / VU actors.
     gate_ready = bool(satisfaction.get("passed"))
     standardized_gate["passed"] = gate_ready
@@ -26123,7 +25138,7 @@ def phase_deliver(state: dict[str, Any], mailer: Mailer) -> None:
         required_actor_count=int(satisfaction.get("required_actor_count") or 0),
         satisfied_actor_count=int(satisfaction.get("satisfied_actor_count") or 0),
     )
-    if multi_agent_treatment:
+    if multi_agent_enabled:
         blocked = (
             candidate != validation.get("candidate_id")
             or candidate != state.get("experience_candidate")
@@ -26169,14 +25184,14 @@ def phase_deliver(state: dict[str, Any], mailer: Mailer) -> None:
             state,
             current=(
                 "交付前检查发现多智能体尚未全部满意"
-                if multi_agent_treatment and not satisfaction.get("passed")
+                if multi_agent_enabled and not satisfaction.get("passed")
                 else "交付前检查发现候选版本或验收上下文已变化"
             ),
             next_step=(
                 "等待研发、测试、虚拟用户"
                 + ("与所有者意图" if owner_feedback_participated(state) else "")
                 + "均满意后再验收"
-                if multi_agent_treatment and not satisfaction.get("passed")
+                if multi_agent_enabled and not satisfaction.get("passed")
                 else "返回独立验收并重新确认当前版本"
             ),
         )
@@ -26198,7 +25213,6 @@ def phase_deliver(state: dict[str, Any], mailer: Mailer) -> None:
             release_id=release.get("id"),
             release_status=release.get("status"),
         )
-        _propose_release_review_if_auto_launch(state, mailer, release)
     # Persist before sending so a transport retry reuses the same release
     # instead of creating a second numbered version.
     save_state(state)
@@ -26240,29 +25254,7 @@ def phase_deliver(state: dict[str, Any], mailer: Mailer) -> None:
         current="候选版本已通过验收并记录为可发布版本，尚未对外发布",
         next_step="等待你决定是否开始准备发布，并继续接收反馈和回访复测",
     )
-    if study_stop_after_first_acceptance():
-        replay = replay_state(state)
-        replay["next_at"] = None
-        replay["current"] = None
-        state["study_acceptance_stop"] = {
-            "candidate_id": candidate,
-            "stopped_at": utcnow(),
-            "rule": "agent_release_consensus; force_pending_publish_at_max_loops",
-        }
-        set_public_work_summary(
-            state,
-            kind="delivered",
-            current="相关智能体已判断当前候选适合发布，已冻结并转入待发布",
-            next_step="请进入发布页完成验收",
-        )
-        event(
-            state,
-            "study_acceptance_iteration_stopped",
-            candidate_id=candidate,
-            stop_rule="agent_release_consensus; force_pending_publish_at_max_loops",
-        )
-    else:
-        schedule_replay(state, candidate, guardrail_fingerprint(state))
+    schedule_replay(state, candidate, guardrail_fingerprint(state))
     event(
         state,
         "delivered",
@@ -26274,68 +25266,6 @@ def phase_deliver(state: dict[str, Any], mailer: Mailer) -> None:
 
 
 def workflow_step(state: dict[str, Any], mailer: Mailer) -> None:
-    # A study publication is a participant-approved, candidate-bound endpoint.
-    # Do this check before candidate invalidation or scheduled replay so a
-    # published trial cannot silently drift after the release decision.
-    try:
-        operations, _ = _read_operations_model(state)
-        publication = (
-            operations.get("community_publication")
-            if isinstance(operations, dict) else {}
-        )
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
-        publication = {}
-    if (
-        isinstance(publication, dict)
-        and publication.get("published")
-        and (
-            publication.get("study_freeze")
-            or (
-                isinstance(operations.get("release_review"), dict)
-                and operations["release_review"].get("study_condition")
-                in {"applooper_bound", "claude_preview"}
-            )
-        )
-    ):
-        freeze_id = lifecycle_identifier(
-            publication.get("candidate_version_id"), "published", limit=64
-        )
-        if state.get("study_published_freeze") != freeze_id:
-            state["study_published_freeze"] = freeze_id
-            state["phase"], state["status"] = "DELIVERED", "delivered_listening"
-            set_public_work_summary(
-                state,
-                kind="published",
-                current="该应用版本已完成验收并发布",
-                next_step="可在发布页签下载当前软件包，或继续补充想法",
-            )
-            event(state, "study_publication_frozen", candidate_id=freeze_id)
-            save_state(state)
-        return
-    if is_agnes_qualification_state(state):
-        readiness = {}
-        try:
-            operations_model, _ = _read_operations_model(state)
-            readiness = (
-                operations_model.get("candidate_readiness")
-                if isinstance(operations_model.get("candidate_readiness"), dict)
-                else {}
-            )
-        except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError):
-            readiness = {}
-        if readiness.get("acceptance_ready") or state.get("acceptance_ready"):
-            if not state.get("study_acceptance_frozen"):
-                state["study_acceptance_frozen"] = True
-                state["phase"], state["status"] = "DELIVERED", "delivered_listening"
-                set_public_work_summary(
-                    state,
-                    kind="acceptance_frozen",
-                    current="应用构建已完成并冻结，请所有者逐项自验证后发布",
-                    next_step="在功能清单中逐项试用并标记通过或不通过",
-                )
-                event(state, "study_acceptance_frozen")
-                save_state(state)
-            return
     if invalidate_delivered_candidate_if_changed(state):
         save_state(state)
     if migrate_task_verification_model(state):
@@ -26366,1374 +25296,6 @@ def live_status(phase: str) -> str:
     if phase == "STOPPED":
         return "stopped"
     return "running"
-
-
-def _operations_model_path(state: dict[str, Any]) -> Path:
-    return run_dir(str(state["run_id"])) / OPERATIONS_MODEL_FILENAME
-
-
-def _read_operations_model(state: dict[str, Any]) -> tuple[dict[str, Any], str]:
-    """Read the standalone Web model first, with state-backed legacy fallbacks."""
-
-    path = _operations_model_path(state)
-    if path.is_file() and path.stat().st_size <= 512_000:
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            value = None
-        if isinstance(value, dict):
-            return value, "file"
-    if isinstance(state.get("operations"), dict):
-        return dict(state["operations"]), "state"
-    lifecycle = state.get("lifecycle") if isinstance(state.get("lifecycle"), dict) else {}
-    nested = lifecycle.get("operations") if isinstance(lifecycle.get("operations"), dict) else {}
-    if nested:
-        value = dict(nested)
-        for key in ("deployment_skill", "operations_skill", "deployment_targets"):
-            if key in lifecycle and key not in value:
-                value[key] = lifecycle[key]
-        return value, "lifecycle"
-    return {}, "none"
-
-
-def _write_operations_model(state: dict[str, Any], model: dict[str, Any], storage: str) -> None:
-    model["updated_at"] = utcnow()
-    if storage == "file":
-        path = _operations_model_path(state)
-        # Release review and launch policy are user-controlled through the Web
-        # service. A long-running agent task may have read the operations model
-        # before the user changed those fields; never let its later full-model
-        # write roll the user's decision back.
-        if path.is_file() and path.stat().st_size <= 512_000:
-            try:
-                latest = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError):
-                latest = None
-            if isinstance(latest, dict):
-                for key in ("release_review", "launch_auto_policy"):
-                    if isinstance(latest.get(key), dict):
-                        model[key] = latest[key]
-        atomic_json(path, model)
-        return
-    if storage == "state":
-        state["operations"] = model
-        save_state(state)
-        return
-    if storage == "lifecycle":
-        lifecycle = state.setdefault("lifecycle", {})
-        lifecycle["operations"] = model
-        for key in ("deployment_skill", "operations_skill", "deployment_targets"):
-            if key in model:
-                lifecycle[key] = model[key]
-        save_state(state)
-
-
-def _operations_sources(model: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return only source identity and metric capabilities safe for workers.
-
-    URLs, connector references and credentials stay in the server-side adapter.
-    They must never cross the operations-worker boundary.
-    """
-
-    sources: dict[str, dict[str, Any]] = {}
-    candidates = list(model.get("data_sources") or [])
-    for target in model.get("deployment_targets") or []:
-        if isinstance(target, dict):
-            candidates.extend(target.get("analytics_sources") or [])
-    for index, raw in enumerate(candidates):
-        if not isinstance(raw, dict) or raw.get("configured") is not True:
-            continue
-        source_id = lifecycle_identifier(raw.get("id"), f"source_{index}", limit=64)
-        metrics = [
-            str(key or "").strip().casefold()
-            for key in raw.get("supported_metrics") or []
-            if str(key or "").strip().casefold() in OPERATIONS_METRIC_KEYS
-        ]
-        if not metrics:
-            continue
-        sources[source_id] = {
-            "id": source_id,
-            "provider_id": lifecycle_identifier(raw.get("provider_id"), "custom", limit=64),
-            "display_name": lifecycle_safe_text(raw.get("display_name"), source_id, limit=120),
-            "kind": lifecycle_identifier(raw.get("kind"), "configured_connector", limit=64),
-            "supported_metrics": list(dict.fromkeys(metrics)),
-        }
-    return list(sources.values())
-
-
-def _operations_supporting_sources(
-    sources: list[dict[str, Any]],
-    metric_key: str,
-) -> list[dict[str, Any]]:
-    return [source for source in sources if metric_key in source.get("supported_metrics", [])]
-
-
-def _operations_agent_state(model: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
-    agent = model.get("operations_agent")
-    if not isinstance(agent, dict):
-        agent = {}
-        model["operations_agent"] = agent
-    agent.setdefault("agent_id", "operations")
-    agent.setdefault("display_name", "Operations agent")
-    agent["provider"] = str(state.get("coding_agent") or "claude")
-    return agent
-
-
-def _operations_metric_record(model: dict[str, Any], key: str) -> dict[str, Any]:
-    metrics = model.get("metrics")
-    if not isinstance(metrics, dict):
-        metrics = {}
-        model["metrics"] = metrics
-    record = metrics.get(key)
-    if not isinstance(record, dict):
-        record = {"key": key}
-        metrics[key] = record
-    return record
-
-
-def _operations_public_failure(exc: Exception) -> str:
-    detail = str(exc).casefold()
-    if "找不到 claude" in detail or "找不到 codex" in detail:
-        return "本机尚未安装或登录所选 coding agent，运营数据刷新未执行"
-    if "超时" in detail or "timeout" in detail:
-        return "运营智能体读取已授权数据源超时，请稍后重试"
-    if "skill" in detail and ("不可用" in detail or "无法运行" in detail):
-        return "上线或运营 Skill 无法运行，请修改 Skill 后重试"
-    return "运营智能体本次无法读取已授权数据源；研发流程未受影响，可稍后重试"
-
-
-def _operations_prompt(
-    request: dict[str, Any],
-    reports: dict[str, dict[str, Any]],
-) -> str:
-    requested = [
-        key for key in request.get("metrics") or []
-        if str(key) in OPERATIONS_METRIC_KEYS
-    ]
-    payload = {
-        "request_id": str(request.get("id") or ""),
-        "requested_metrics": requested,
-        "privacy_boundary": {
-            "aggregate_only": True,
-            "contains_raw_events": False,
-            "contains_identifiers": False,
-        },
-        "authorized_aggregate_snapshots": [
-            reports[key] for key in requested if key in reports
-        ],
-    }
-    return prompt_json(
-        "只解释输入中由服务端提供且通过隐私校验的脱敏聚合快照。"
-        "不得访问文件、工作区、网络、公开平台、URL、连接器或其他来源，也不得执行任何工具或写操作。"
-        "不得补全、猜测、推算或编造缺失指标。只返回结构化结果，不输出内部推理。\n\n"
-        "运营刷新输入：",
-        payload,
-    )
-
-
-def _valid_operations_number(value: Any) -> bool:
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(float(value))
-        and float(value) >= 0
-    )
-
-
-def _operations_snapshot_privacy_verified(snapshot: dict[str, Any]) -> bool:
-    """Accept only snapshots explicitly attested by a server-side adapter."""
-
-    privacy = snapshot.get("privacy") if isinstance(snapshot.get("privacy"), dict) else {}
-    trusted = snapshot.get("server_verified") is True or snapshot.get("trusted") is True
-    privacy_mode = str(
-        snapshot.get("privacy_mode") or privacy.get("mode") or privacy.get("privacy_mode") or ""
-    ).strip().casefold()
-    raw_event_storage = snapshot.get("raw_event_storage")
-    if raw_event_storage is None:
-        raw_event_storage = privacy.get("raw_event_storage")
-    return (
-        trusted
-        and privacy_mode == "aggregate_only"
-        and raw_event_storage is False
-    )
-
-
-def _operations_safe_bucket(value: Any, *, version: bool = False) -> str:
-    """Whitelist aggregate bucket labels so they cannot carry user text."""
-
-    text = str(value or "").strip()
-    if not text or len(text) > 64:
-        return ""
-    date_or_period = re.fullmatch(
-        r"(?:\d{4}-\d{2}(?:-\d{2})?|\d{4}-W\d{2}|\d{4}-Q[1-4])",
-        text,
-        flags=re.IGNORECASE,
-    )
-    release = re.fullmatch(r"v?\d+(?:\.\d+){0,3}(?:[-+][A-Za-z0-9.-]{1,24})?", text)
-    if version:
-        return text if release else ""
-    return text if date_or_period or release else ""
-
-
-def _operations_snapshot_reports(
-    model: dict[str, Any],
-    sources: list[dict[str, Any]],
-    requested: list[str],
-) -> dict[str, dict[str, Any]]:
-    """Extract the newest valid metrics from server-owned aggregate snapshots.
-
-    URL, connector reference, credential and raw-event fields are neither read
-    nor emitted. Invalid or untrusted snapshots simply remain unavailable.
-    """
-
-    source_by_id = {str(source["id"]): source for source in sources}
-    candidates: list[tuple[dict[str, Any], str]] = []
-    top_level = model.get("aggregate_snapshots")
-    if isinstance(top_level, dict):
-        top_level = [top_level]
-    if isinstance(top_level, list):
-        candidates.extend((item, "") for item in top_level if isinstance(item, dict))
-
-    raw_sources = list(model.get("data_sources") or [])
-    for target in model.get("deployment_targets") or []:
-        if isinstance(target, dict):
-            raw_sources.extend(target.get("analytics_sources") or [])
-    for index, raw_source in enumerate(raw_sources):
-        if not isinstance(raw_source, dict):
-            continue
-        inherited_source_id = lifecycle_identifier(
-            raw_source.get("id"), f"source_{index}", limit=64
-        )
-        nested: list[Any] = []
-        for key in ("aggregate_snapshot", "aggregate_snapshots"):
-            value = raw_source.get(key)
-            if isinstance(value, dict):
-                nested.append(value)
-            elif isinstance(value, list):
-                nested.extend(value)
-        candidates.extend(
-            (item, inherited_source_id) for item in nested if isinstance(item, dict)
-        )
-
-    selected: dict[str, tuple[str, dict[str, Any]]] = {}
-    for snapshot, inherited_source_id in candidates[:256]:
-        if not _operations_snapshot_privacy_verified(snapshot):
-            continue
-        source_id = lifecycle_identifier(snapshot.get("source_id"), inherited_source_id, limit=64)
-        source = source_by_id.get(source_id)
-        observed_at = lifecycle_timestamp(snapshot.get("observed_at"))
-        if source is None or not observed_at:
-            continue
-        snapshot_id = lifecycle_identifier(
-            snapshot.get("snapshot_id", snapshot.get("id")), "", limit=64
-        )
-        if not snapshot_id:
-            snapshot_id = "snapshot_" + hashlib.sha256(
-                f"{source_id}\0{observed_at}".encode("utf-8", "replace")
-            ).hexdigest()[:16]
-
-        metrics_raw = snapshot.get("metrics")
-        metric_items: list[tuple[str, dict[str, Any]]] = []
-        if isinstance(metrics_raw, dict):
-            for raw_key, value in metrics_raw.items():
-                metric_items.append(
-                    (str(raw_key), value if isinstance(value, dict) else {"value_number": value})
-                )
-        elif isinstance(metrics_raw, list):
-            metric_items.extend(
-                (str(item.get("key") or ""), item)
-                for item in metrics_raw
-                if isinstance(item, dict)
-            )
-        elif snapshot.get("key"):
-            metric_items.append((str(snapshot.get("key") or ""), snapshot))
-
-        for raw_key, metric in metric_items:
-            key = raw_key.strip().casefold()
-            if (
-                key not in requested
-                or key not in source.get("supported_metrics", [])
-                or key not in OPERATIONS_METRIC_KEYS
-            ):
-                continue
-            report: dict[str, Any] = {
-                "key": key,
-                "status": "available",
-                "value_number": 0,
-                "series": [],
-                "source_id": source_id,
-                "observed_at": observed_at,
-                "provenance": f"aggregate_snapshot:{snapshot_id}",
-                "error": "",
-            }
-            if key in OPERATIONS_SERIES_METRICS:
-                series: list[dict[str, Any]] = []
-                for point in (metric.get("series") or [])[:120]:
-                    if not isinstance(point, dict) or not _valid_operations_number(point.get("value")):
-                        continue
-                    label = _operations_safe_bucket(
-                        point.get("label"), version=key == "version_adoption"
-                    )
-                    version_label = _operations_safe_bucket(point.get("version"), version=True)
-                    at = lifecycle_timestamp(point.get("at"))
-                    if not label or (point.get("at") and not at):
-                        continue
-                    series.append(
-                        {
-                            "label": label,
-                            "value": point["value"],
-                            "at": at,
-                            "version": version_label,
-                        }
-                    )
-                if not series:
-                    continue
-                report["series"] = series
-            else:
-                value = metric.get("value_number", metric.get("value"))
-                if not _valid_operations_number(value):
-                    continue
-                report["value_number"] = value
-            previous = selected.get(key)
-            if previous is None or observed_at > previous[0]:
-                selected[key] = (observed_at, report)
-    return {key: report for key, (_observed_at, report) in selected.items()}
-
-
-def _operations_report_value(key: str, report: dict[str, Any]) -> Any:
-    if key not in OPERATIONS_SERIES_METRICS:
-        value = report.get("value_number")
-        if not _valid_operations_number(value):
-            raise WorkflowError(f"运营指标 {key} 缺少有效数值")
-        return value
-    series: list[dict[str, Any]] = []
-    for item in report.get("series") or []:
-        if not isinstance(item, dict) or not _valid_operations_number(item.get("value")):
-            raise WorkflowError(f"运营指标 {key} 的序列值无效")
-        series.append(
-            {
-                "label": lifecycle_safe_text(item.get("label"), "", limit=120),
-                "value": item["value"],
-                "at": lifecycle_safe_text(item.get("at"), "", limit=64),
-                "version": lifecycle_safe_text(item.get("version"), "", limit=120),
-            }
-        )
-    if not series:
-        raise WorkflowError(f"运营指标 {key} 缺少有效序列")
-    return series[:120]
-
-
-def _complete_operations_refresh(
-    state: dict[str, Any],
-    request_id: str,
-    result: dict[str, Any],
-) -> None:
-    model, storage = _read_operations_model(state)
-    requests = [row for row in model.get("refresh_requests") or [] if isinstance(row, dict)]
-    request = next((row for row in requests if str(row.get("id") or "") == request_id), None)
-    if request is None:
-        return
-    now = utcnow()
-    requested = [key for key in request.get("metrics") or [] if key in OPERATIONS_METRIC_KEYS]
-    sources = _operations_sources(model)
-    source_by_id = {str(source["id"]): source for source in sources}
-    reports = {
-        str(report.get("key") or ""): report
-        for report in result.get("metrics") or []
-        if isinstance(report, dict) and str(report.get("key") or "") in requested
-    }
-    available_keys: list[str] = []
-    available_source_ids: list[str] = []
-    for key in requested:
-        record = _operations_metric_record(model, key)
-        supporting = {
-            str(source["id"]): source
-            for source in _operations_supporting_sources(sources, key)
-        }
-        report = reports.get(key)
-        if not supporting:
-            record.update({"status": "not_configured", "value": None, "source_id": "", "source_name": "", "observed_at": "", "provenance": ""})
-            continue
-        if not report or str(report.get("status") or "") != "available":
-            status = "error" if report and report.get("status") == "error" else "unavailable"
-            record.update({"status": status, "value": None, "source_id": "", "source_name": "", "observed_at": "", "provenance": ""})
-            continue
-        source_id = lifecycle_identifier(report.get("source_id"), "", limit=64)
-        observed_at = lifecycle_timestamp(report.get("observed_at"))
-        provenance = lifecycle_safe_text(report.get("provenance"), "", limit=500)
-        source = supporting.get(source_id)
-        if source is None or not observed_at or not provenance:
-            raise WorkflowError(f"运营指标 {key} 缺少来源、采集时间或 provenance")
-        value = _operations_report_value(key, report)
-        record.update(
-            {
-                "status": "available",
-                "value": value,
-                "source_id": source_id,
-                "source_name": str(source.get("display_name") or source_id),
-                "observed_at": observed_at,
-                "provenance": provenance,
-            }
-        )
-        available_keys.append(key)
-        available_source_ids.append(source_id)
-
-    suggestions: list[dict[str, Any]] = []
-    if available_keys:
-        for raw in (result.get("suggestions") or [])[:1]:
-            if not isinstance(raw, dict):
-                continue
-            body = lifecycle_safe_text(raw.get("body"), "", limit=1_000)
-            if not body:
-                continue
-            metric_keys = [key for key in raw.get("metric_keys") or [] if key in available_keys]
-            source_ids = [sid for sid in raw.get("source_ids") or [] if sid in available_source_ids and sid in source_by_id]
-            suggestions.append(
-                {
-                    "id": "suggestion_" + hashlib.sha256((request_id + body).encode("utf-8")).hexdigest()[:16],
-                    "title": lifecycle_safe_text(raw.get("title"), "运营建议", limit=160),
-                    "body": body,
-                    "metric_keys": list(dict.fromkeys(metric_keys)),
-                    "source_ids": list(dict.fromkeys(source_ids)),
-                    "created_at": now,
-                }
-            )
-    if suggestions:
-        previous = [row for row in model.get("suggestions") or [] if isinstance(row, dict)]
-        model["suggestions"] = (previous + suggestions)[-50:]
-    request.update({"status": "completed", "updated_at": now, "error": ""})
-    agent = _operations_agent_state(model, state)
-    session = state.get("sessions", {}).get("operations", {})
-    agent.update(
-        {
-            "session_id": str(session.get("id") or ""),
-            "status": "completed",
-            "current_request_id": request_id,
-            "current_action": "",
-            "updated_at": now,
-            "last_refresh_completed_at": now,
-            "last_suggestion_at": now if suggestions else str(agent.get("last_suggestion_at") or ""),
-            "last_error": "",
-        }
-    )
-    _record_iteration_refresh_signals(model, requested, available_keys, suggestions)
-    _write_operations_model(state, model, storage)
-
-
-def _propose_release_review_if_auto_launch(
-    state: dict[str, Any],
-    mailer: Mailer | WebChannel,
-    release: dict[str, Any],
-) -> None:
-    """When auto-launch policy is on, prepare a version-bound ReleaseReview proposal."""
-
-    model, storage = _read_operations_model(state)
-    if storage == "none":
-        return
-    policy = model.get("launch_auto_policy") if isinstance(model.get("launch_auto_policy"), dict) else {}
-    if not policy.get("enabled"):
-        return
-    run_id = str(state["run_id"])
-    try:
-        import os
-        import workflow_web
-
-        root = Path(__file__).resolve().parent
-        service = workflow_web.WorkflowWebService(
-            Path(os.environ.get("WF_PROJECTS_DIR", str(root / "projects"))),
-            Path(__file__).resolve(),
-            Path(os.environ.get("WF_WEB_DIR", str(root / "web"))),
-        )
-        service.ensure_release_review(run_id, locale="zh-CN", force=False)
-    except Exception as exc:
-        event(state, "release_review_propose_failed", error=str(exc)[:300])
-        return
-    label = lifecycle_safe_text(release.get("label"), "当前版本", limit=120)
-    release_id = lifecycle_identifier(release.get("id"), lifecycle_identifier(release.get("candidate"), "candidate", limit=64), limit=64)
-    mailer.send(
-        state,
-        f"发布审查已准备 · {label}",
-        (
-            f"{label} 已达到自动上线提案条件。请在「上线」页逐项完成 ReleaseReview 清单，"
-            "确认发布责任后再执行上线。自动上线仅生成审查提案，不会绕过人工确认。"
-        ),
-        key=f"release-review-propose:{release_id}",
-        actor="developer",
-    )
-    event(state, "release_review_proposed", release_id=release.get("id"))
-
-
-ITERATION_FEEDBACK_CHANNEL = "experience:real-users"
-ITERATION_PUBLISH_MIN_SECONDS = 4 * 3600
-ITERATION_PUBLISH_FORCE_SECONDS = 7 * 86400
-ITERATION_MIN_SIGNAL_SCORE = 3
-ITERATION_MAX_SIGNAL_BUFFER = 40
-
-ITERATION_INSIGHT_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["title", "summary", "themes", "signal_score"],
-    "properties": {
-        "title": {"type": "string"},
-        "summary": {"type": "string"},
-        "signal_score": {"type": "number"},
-        "themes": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "module": {"type": "string"},
-                    "signal": {"type": "string"},
-                    "importance": {"type": "string"},
-                },
-            },
-        },
-        "recommended_actions": {"type": "array", "items": {"type": "string"}},
-    },
-}
-
-ITERATION_DEVELOPER_REPLY_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["reply", "status", "changes"],
-    "properties": {
-        "reply": {"type": "string"},
-        "status": {"type": "string"},
-        "changes": {"type": "array", "items": {"type": "string"}},
-    },
-}
-
-
-def _default_iteration_feedback() -> dict[str, Any]:
-    return {
-        "signal_buffer": [],
-        "signal_score": 0,
-        "last_published_at": "",
-        "last_insight_id": "",
-        "pending_insight_id": "",
-        "pending_developer": False,
-        "last_developer_reply_at": "",
-        "next_check_at": "",
-        "last_metric_fingerprint": "",
-    }
-
-
-def _iteration_feedback_state(model: dict[str, Any]) -> dict[str, Any]:
-    raw = model.get("iteration_feedback")
-    state = _default_iteration_feedback()
-    if not isinstance(raw, dict):
-        return state
-    buffer: list[dict[str, Any]] = []
-    if isinstance(raw.get("signal_buffer"), list):
-        for item in raw["signal_buffer"][-ITERATION_MAX_SIGNAL_BUFFER:]:
-            if not isinstance(item, dict):
-                continue
-            body = lifecycle_safe_text(item.get("body"), "", limit=500)
-            if not body:
-                continue
-            buffer.append({
-                "kind": lifecycle_safe_text(item.get("kind"), "signal", limit=64),
-                "body": body,
-                "score": max(0, min(10, int(item.get("score") or 1))),
-                "module": lifecycle_safe_text(item.get("module"), "", limit=160),
-                "at": lifecycle_timestamp(item.get("at")),
-            })
-    state["signal_buffer"] = buffer
-    try:
-        state["signal_score"] = max(0, int(raw.get("signal_score") or 0))
-    except (TypeError, ValueError):
-        state["signal_score"] = sum(int(item.get("score") or 0) for item in buffer)
-    for key in (
-        "last_published_at",
-        "last_insight_id",
-        "pending_insight_id",
-        "last_developer_reply_at",
-        "next_check_at",
-        "last_metric_fingerprint",
-    ):
-        state[key] = lifecycle_safe_text(raw.get(key), "", limit=64)
-    state["pending_developer"] = bool(raw.get("pending_developer"))
-    return state
-
-
-def _save_iteration_feedback(model: dict[str, Any], feedback: dict[str, Any]) -> None:
-    model["iteration_feedback"] = feedback
-
-
-def _append_iteration_signals(model: dict[str, Any], signals: list[dict[str, Any]]) -> None:
-    if not signals:
-        return
-    feedback = _iteration_feedback_state(model)
-    now = utcnow()
-    for signal in signals:
-        if not isinstance(signal, dict):
-            continue
-        body = lifecycle_safe_text(signal.get("body"), "", limit=500)
-        if not body:
-            continue
-        feedback["signal_buffer"].append({
-            "kind": lifecycle_safe_text(signal.get("kind"), "signal", limit=64),
-            "body": body,
-            "score": max(1, min(10, int(signal.get("score") or 1))),
-            "module": lifecycle_safe_text(signal.get("module"), "", limit=160),
-            "at": now,
-        })
-    feedback["signal_buffer"] = feedback["signal_buffer"][-ITERATION_MAX_SIGNAL_BUFFER:]
-    feedback["signal_score"] = sum(int(item.get("score") or 0) for item in feedback["signal_buffer"])
-    if not feedback.get("next_check_at"):
-        feedback["next_check_at"] = now
-    _save_iteration_feedback(model, feedback)
-
-
-def _record_iteration_refresh_signals(
-    model: dict[str, Any],
-    requested: list[str],
-    available_keys: list[str],
-    suggestions: list[dict[str, Any]],
-) -> None:
-    signals: list[dict[str, Any]] = []
-    metrics = model.get("metrics") if isinstance(model.get("metrics"), dict) else {}
-    fingerprint_parts = []
-    for key in requested:
-        record = metrics.get(key) if isinstance(metrics.get(key), dict) else {}
-        value = record.get("value")
-        fingerprint_parts.append(f"{key}:{value}")
-        if key in available_keys and value is not None:
-            signals.append({
-                "kind": "metric",
-                "body": f"指标 {key} 当前值为 {value}（来源 {record.get('source_name') or record.get('source_id') or 'configured'}）。",
-                "score": 2,
-                "module": key,
-            })
-    fingerprint = hashlib.sha256("|".join(fingerprint_parts).encode("utf-8")).hexdigest()[:16]
-    feedback = _iteration_feedback_state(model)
-    if fingerprint and fingerprint != feedback.get("last_metric_fingerprint"):
-        feedback["last_metric_fingerprint"] = fingerprint
-        _save_iteration_feedback(model, feedback)
-    _append_iteration_signals(model, signals)
-
-
-def _iteration_real_metrics_available(model: dict[str, Any]) -> bool:
-    metrics = model.get("metrics") if isinstance(model.get("metrics"), dict) else {}
-    for key in OPERATIONS_METRIC_KEYS:
-        record = metrics.get(key) if isinstance(metrics.get(key), dict) else None
-        if not isinstance(record, dict):
-            continue
-        if (
-            str(record.get("status") or "") == "available"
-            and record.get("value") is not None
-            and lifecycle_safe_text(record.get("provenance"), "", limit=500)
-        ):
-            return True
-    return False
-
-
-def _iteration_metric_signals(model: dict[str, Any]) -> list[dict[str, Any]]:
-    feedback = _iteration_feedback_state(model)
-    return [
-        item for item in feedback.get("signal_buffer") or []
-        if isinstance(item, dict) and str(item.get("kind") or "") == "metric"
-    ]
-
-
-def _iteration_publish_due(model: dict[str, Any]) -> bool:
-    if not _iteration_real_metrics_available(model):
-        return False
-    feedback = _iteration_feedback_state(model)
-    if feedback.get("pending_developer"):
-        return False
-    metric_signals = _iteration_metric_signals(model)
-    if not metric_signals:
-        return False
-    metric_score = sum(int(item.get("score") or 0) for item in metric_signals)
-    if metric_score < ITERATION_MIN_SIGNAL_SCORE:
-        return False
-    now = dt.datetime.now(dt.timezone.utc)
-    last_published = feedback.get("last_published_at") or ""
-    if last_published:
-        try:
-            last_dt = dt.datetime.fromisoformat(last_published.replace("Z", "+00:00"))
-            elapsed = (now - last_dt.astimezone(dt.timezone.utc)).total_seconds()
-            if elapsed < ITERATION_PUBLISH_MIN_SECONDS:
-                return False
-            if elapsed >= ITERATION_PUBLISH_FORCE_SECONDS:
-                return True
-        except ValueError:
-            pass
-    else:
-        next_check = feedback.get("next_check_at") or ""
-        if next_check:
-            try:
-                check_dt = dt.datetime.fromisoformat(next_check.replace("Z", "+00:00"))
-                if now < check_dt.astimezone(dt.timezone.utc):
-                    return False
-            except ValueError:
-                pass
-    return metric_score >= ITERATION_MIN_SIGNAL_SCORE
-
-
-def _iteration_developer_turn_allowed(state: dict[str, Any]) -> bool:
-    phase = str(state.get("phase") or "").upper()
-    if phase in {"PLAN", "DEVELOP", "EXPERIENCE", "REVIEW"} and str(state.get("status") or "") == "running":
-        return False
-    if state.get("pending_user"):
-        return False
-    return phase in {"DELIVERED", "WAIT_USER", "REPLAY", "PLAN", "DEVELOP", "EXPERIENCE", "REVIEW"}
-
-
-def _iteration_insight_context(state: dict[str, Any], model: dict[str, Any]) -> dict[str, Any]:
-    feedback = _iteration_feedback_state(model)
-    metrics = {}
-    for key in OPERATIONS_METRIC_KEYS:
-        record = model.get("metrics", {}).get(key) if isinstance(model.get("metrics"), dict) else None
-        if isinstance(record, dict) and record.get("value") is not None:
-            metrics[key] = {
-                "value": record.get("value"),
-                "status": record.get("status"),
-                "source_name": record.get("source_name"),
-            }
-    experience_feedback: list[str] = []
-    for row in state.get("conversation_ledger", {}).values():
-        if not isinstance(row, dict):
-            continue
-        channel = str(row.get("channel") or "")
-        if not channel.startswith("experience:") or channel == ITERATION_FEEDBACK_CHANNEL:
-            continue
-        if str(row.get("actor") or "") not in {"experience", "persona"}:
-            continue
-        body = lifecycle_safe_text(row.get("body"), "", limit=400)
-        if body:
-            experience_feedback.append(body)
-    return {
-        "signal_buffer": feedback.get("signal_buffer") or [],
-        "signal_score": feedback.get("signal_score") or 0,
-        "metrics": metrics,
-        "suggestions": (model.get("suggestions") or [])[-5:],
-        "analytics_skill": model.get("analytics_skill") if isinstance(model.get("analytics_skill"), dict) else {},
-        "experience_feedback_recent": experience_feedback[-12:],
-        "workflow_phase": str(state.get("phase") or "")[:64],
-        "workflow_status": str(state.get("status") or "")[:64],
-    }
-
-
-def send_iteration_channel_message(
-    state: dict[str, Any],
-    mailer: Mailer | WebChannel,
-    *,
-    title: str,
-    body: str,
-    actor: str,
-    message_kind: str,
-    insight_id: str = "",
-    key: str = "",
-) -> str:
-    digest = hashlib.sha256(f"{message_kind}\0{insight_id}\0{body}".encode("utf-8")).hexdigest()[:16]
-    return mailer.send(
-        state,
-        title,
-        body,
-        key=key or f"iteration:{message_kind}:{insight_id or digest}",
-        channel=ITERATION_FEEDBACK_CHANNEL,
-        actor=actor,
-        persona_name="运营智能体" if actor == "operations" else "",
-        message_kind=message_kind,
-        insight_id=insight_id,
-    )
-
-
-def _publish_iteration_insight(state: dict[str, Any], mailer: Mailer | WebChannel, model: dict[str, Any]) -> bool:
-    if not _iteration_real_metrics_available(model):
-        return False
-    feedback = _iteration_feedback_state(model)
-    context = _iteration_insight_context(state, model)
-    if not context.get("metrics"):
-        return False
-    try:
-        result = call_claude(
-            state,
-            "operations",
-            prompt_json(
-                "Summarize real-user analytics signals for the developer agent. "
-                "Focus on aggregate page-view interest, module usage patterns, and feedback themes. "
-                "This summary will appear in the Iteration tab and must clearly represent real users, not virtual testers. "
-                "Write in concise Chinese unless the product context is clearly English-only.",
-                context,
-            ),
-            ITERATION_INSIGHT_SCHEMA,
-            writable=False,
-        )
-        save_state(state)
-    except Exception as exc:
-        event(state, "iteration_insight_failed", error=str(exc)[:300])
-        return False
-    summary = lifecycle_safe_text(result.get("summary"), "", limit=4000)
-    title = lifecycle_safe_text(result.get("title"), "真实用户反馈摘要", limit=160)
-    if not summary:
-        return False
-    insight_id = "insight-" + uuid.uuid4().hex[:16]
-    body = summary
-    themes = [item for item in (result.get("themes") or []) if isinstance(item, dict)]
-    if themes:
-        body += "\n\n重点：\n" + "\n".join(
-            f"- {lifecycle_safe_text(item.get('module'), '模块', limit=120)}："
-            f"{lifecycle_safe_text(item.get('signal'), '', limit=300)}"
-            for item in themes[:6]
-        )
-    body = public_mail_text(body, summary)
-    send_iteration_channel_message(
-        state,
-        mailer,
-        title=f"真实用户 · {title}",
-        body=body,
-        actor="operations",
-        message_kind="real_user_insight",
-        insight_id=insight_id,
-    )
-    now = utcnow()
-    feedback["last_published_at"] = now
-    feedback["last_insight_id"] = insight_id
-    feedback["pending_insight_id"] = insight_id
-    feedback["pending_developer"] = True
-    feedback["signal_buffer"] = []
-    feedback["signal_score"] = 0
-    feedback["next_check_at"] = now
-    _save_iteration_feedback(model, feedback)
-    _write_operations_model(state, model, _read_operations_model(state)[1])
-    event(state, "iteration_insight_published", insight_id=insight_id)
-    return True
-
-
-def _process_iteration_developer_turn(
-    state: dict[str, Any],
-    mailer: Mailer | WebChannel,
-    model: dict[str, Any],
-    insight_id: str,
-) -> bool:
-    insight_body = ""
-    insight_title = ""
-    for row in state.get("conversation_ledger", {}).values():
-        if not isinstance(row, dict):
-            continue
-        if str(row.get("channel") or "") != ITERATION_FEEDBACK_CHANNEL:
-            continue
-        if str(row.get("insight_id") or "") != insight_id:
-            continue
-        if str(row.get("kind") or "") != "real_user_insight":
-            continue
-        insight_body = lifecycle_safe_text(row.get("body"), "", limit=4000)
-        insight_title = lifecycle_safe_text(row.get("title"), "", limit=200)
-        break
-    if not insight_body:
-        feedback = _iteration_feedback_state(model)
-        feedback["pending_developer"] = False
-        feedback["pending_insight_id"] = ""
-        _save_iteration_feedback(model, feedback)
-        _write_operations_model(state, model, _read_operations_model(state)[1])
-        return False
-    payload = {
-        "task": (
-            "真实用户（非虚拟内测用户）的数据洞察已由运营智能体汇总。请像处理虚拟用户体验反馈一样，"
-            "优先修复 bug 与 guardrail 内可用性问题，然后向运营智能体回复已完成的优化。"
-            "不要要求用户重新配置数据源；回复应面向运营智能体。"
-        ),
-        "insight_id": insight_id,
-        "insight_title": insight_title,
-        "insight_body": insight_body,
-        "active_guardrails": active_guardrails(state),
-        "current_capabilities": (state.get("last_developer") or {}).get("summary"),
-    }
-    writable = _iteration_developer_turn_allowed(state) and str(state.get("phase") or "").upper() in {"DELIVERED", "WAIT_USER", "REPLAY"}
-    try:
-        result = call_claude(
-            state,
-            "developer",
-            prompt_json("处理真实用户数据洞察并回复运营智能体", payload),
-            ITERATION_DEVELOPER_REPLY_SCHEMA,
-            writable=writable,
-        )
-        save_state(state)
-    except Exception as exc:
-        event(state, "iteration_developer_reply_failed", insight_id=insight_id, error=str(exc)[:300])
-        return False
-    reply = lifecycle_safe_text(result.get("reply"), "", limit=4000)
-    changes = [lifecycle_safe_text(item, "", limit=300) for item in (result.get("changes") or []) if lifecycle_safe_text(item, "", limit=300)]
-    if changes:
-        reply = reply + "\n\n本轮调整：\n" + "\n".join(f"- {item}" for item in changes[:6])
-    reply = public_mail_text(reply, "已收到真实用户反馈，后续会继续跟进。")
-    send_iteration_channel_message(
-        state,
-        mailer,
-        title="研发回复 · 真实用户反馈",
-        body=reply,
-        actor="developer",
-        message_kind="real_user_reply",
-        insight_id=insight_id,
-        key=f"iteration:developer-reply:{insight_id}",
-    )
-    feedback = _iteration_feedback_state(model)
-    feedback["pending_developer"] = False
-    feedback["pending_insight_id"] = ""
-    feedback["last_developer_reply_at"] = utcnow()
-    _save_iteration_feedback(model, feedback)
-    _write_operations_model(state, model, _read_operations_model(state)[1])
-    event(state, "iteration_developer_replied", insight_id=insight_id, status=str(result.get("status") or "")[:64])
-    return True
-
-
-def process_one_iteration_feedback_cycle(state: dict[str, Any], mailer: Mailer | WebChannel) -> bool:
-    # Product-workflow progression always wins over the optional lifecycle
-    # operations loop.  A metric signal can otherwise be publishable on every
-    # scheduler pass while DEVELOP/REVIEW/EXPERIENCE is live; even when its
-    # helper ultimately does no visible work, repeatedly servicing it here can
-    # starve ``workflow_step`` and leave a healthy worker burning CPU without
-    # returning experience feedback to the developer.
-    phase = str(state.get("phase") or "").upper()
-    if phase in {"PLAN", "DEVELOP", "REVIEW", "EXPERIENCE"}:
-        return False
-    model, storage = _read_operations_model(state)
-    if storage == "none":
-        return False
-    feedback = _iteration_feedback_state(model)
-    if not feedback.get("signal_buffer") and not feedback.get("pending_developer"):
-        _record_iteration_refresh_signals(model, [], [], [])
-        feedback = _iteration_feedback_state(model)
-    pending_id = str(feedback.get("pending_insight_id") or "")
-    if feedback.get("pending_developer") and pending_id:
-        if _iteration_developer_turn_allowed(state):
-            return _process_iteration_developer_turn(state, mailer, model, pending_id)
-        return False
-    if _iteration_publish_due(model):
-        return _publish_iteration_insight(state, mailer, model)
-    return False
-
-
-def _fail_operations_refresh(state: dict[str, Any], request_id: str, error: str) -> None:
-    model, storage = _read_operations_model(state)
-    request = next(
-        (
-            row for row in model.get("refresh_requests") or []
-            if isinstance(row, dict) and str(row.get("id") or "") == request_id
-        ),
-        None,
-    )
-    if request is None:
-        return
-    now = utcnow()
-    request.update({"status": "error", "updated_at": now, "error": error[:500]})
-    for key in request.get("metrics") or []:
-        if key in OPERATIONS_METRIC_KEYS:
-            _operations_metric_record(model, key).update({"status": "error", "value": None})
-    agent = _operations_agent_state(model, state)
-    session = state.get("sessions", {}).get("operations", {})
-    agent.update(
-        {
-            "session_id": str(session.get("id") or ""),
-            "status": "error",
-            "current_request_id": request_id,
-            "current_action": "",
-            "updated_at": now,
-            "last_error": error[:500],
-        }
-    )
-    _write_operations_model(state, model, storage)
-
-
-def process_one_operations_refresh(state: dict[str, Any]) -> bool:
-    """Run at most one queued, read-only operations turn without blocking development on failure."""
-
-    model, storage = _read_operations_model(state)
-    if storage == "none":
-        return False
-    request = next(
-        (
-            row for row in model.get("refresh_requests") or []
-            if isinstance(row, dict) and str(row.get("status") or "") == "queued"
-        ),
-        None,
-    )
-    if request is None:
-        return False
-    request_id = str(request.get("id") or "")
-    requested = [key for key in request.get("metrics") or [] if key in OPERATIONS_METRIC_KEYS]
-    sources = _operations_sources(model)
-    configured = [key for key in requested if _operations_supporting_sources(sources, key)]
-    aggregate_reports = _operations_snapshot_reports(model, sources, requested)
-    now = utcnow()
-    agent = _operations_agent_state(model, state)
-    if not aggregate_reports:
-        request.update({"status": "waiting_for_configuration", "updated_at": now, "error": ""})
-        for key in requested:
-            status = "unavailable" if key in configured else "not_configured"
-            _operations_metric_record(model, key).update({"status": status, "value": None})
-        agent.update(
-            {
-                "status": "waiting_for_configuration",
-                "current_request_id": request_id,
-                "current_action": "Waiting for a privacy-verified aggregate snapshot",
-                "updated_at": now,
-                "last_error": "",
-            }
-        )
-        _write_operations_model(state, model, storage)
-        event(
-            state,
-            "operations_refresh_waiting_for_aggregate_snapshot",
-            request_id=request_id,
-        )
-        return True
-
-    request.update({"status": "running", "updated_at": now, "error": ""})
-    for key in requested:
-        _operations_metric_record(model, key).update(
-            {"status": "refreshing" if key in configured else "not_configured", "value": None}
-        )
-    agent.update(
-        {
-            "status": "running",
-            "current_request_id": request_id,
-            "current_action": "Refreshing operations metrics",
-            "updated_at": now,
-            "last_error": "",
-        }
-    )
-    _write_operations_model(state, model, storage)
-    event(
-        state,
-        "operations_refresh_started",
-        request_id=request_id,
-        metrics=sorted(aggregate_reports),
-    )
-    try:
-        # Metrics are copied deterministically from server-owned, privacy-verified
-        # aggregate snapshots.  The worker never receives a URL or connector
-        # credential and does not invoke a coding agent or any discovery tool.
-        result = {
-            "summary": "Applied privacy-verified aggregate snapshots",
-            "metrics": list(aggregate_reports.values()),
-            "suggestions": [],
-        }
-        _complete_operations_refresh(state, request_id, result)
-        event(state, "operations_refresh_completed", request_id=request_id)
-    except Exception as exc:
-        public_error = _operations_public_failure(exc)
-        with contextlib.suppress(Exception):
-            _fail_operations_refresh(state, request_id, public_error)
-        event(
-            state,
-            "operations_refresh_failed",
-            request_id=request_id,
-            error_type=type(exc).__name__,
-            error=public_error,
-        )
-    return True
-
-
-OPERATIONS_AGENT_REPLY_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["reply", "analytics_skill", "traffic_skill"],
-    "properties": {
-        "reply": {"type": "string"},
-        "deployment_skill": {"type": ["string", "null"]},
-        "analytics_skill": {
-            "anyOf": [
-                {"type": "null"},
-                {"type": "string"},
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "name": {"type": "string"},
-                        "summary": {"type": "string"},
-                        "instructions": {"type": "string"},
-                        "config_mode": {"type": "string"},
-                        "data_sources": {"type": "array", "items": {"type": "object"}},
-                        "missing_fields": {"type": "array", "items": {"type": "object"}},
-                    },
-                },
-            ],
-        },
-        "operations_skill": {"type": ["string", "null"]},
-        "traffic_skill": {
-            "anyOf": [
-                {"type": "null"},
-                {"type": "string"},
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "name": {"type": "string"},
-                        "summary": {"type": "string"},
-                        "instructions": {"type": "string"},
-                        "config_mode": {"type": "string"},
-                        "campaign_items": {"type": "array", "items": {"type": "object"}},
-                        "missing_fields": {"type": "array", "items": {"type": "object"}},
-                    },
-                },
-            ],
-        },
-        "traffic_state": {
-            "type": ["object", "null"],
-            "additionalProperties": False,
-            "properties": {
-                "status": {"type": "string"},
-                "summary": {"type": "string"},
-                "platforms": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "name": {"type": "string"},
-                            "method": {"type": "string"},
-                            "schedule": {"type": "string"},
-                            "triggers": {"type": "string"},
-                            "status": {"type": "string"},
-                        },
-                    },
-                },
-            },
-        },
-        "persona_operations": {
-            "type": ["array", "null"],
-            "items": PERSONA_MUTATION_OP_SCHEMA,
-        },
-    },
-}
-
-
-def _merge_operations_skill_update(skill: dict[str, Any], updated: Any, *, now: str) -> bool:
-    if updated is None:
-        return False
-    if isinstance(updated, str):
-        text = updated.strip()[:6000]
-        if not text:
-            return False
-        skill["instructions"] = text
-        skill["is_default"] = False
-        skill["revision"] = max(1, int(skill.get("revision") or 1)) + 1
-        skill["updated_at"] = now
-        return True
-    if not isinstance(updated, dict):
-        return False
-    changed = False
-    for key in ("name", "summary", "instructions", "config_mode"):
-        value = updated.get(key)
-        if isinstance(value, str) and value.strip():
-            skill[key] = value.strip()[:6000 if key == "instructions" else 120]
-            changed = True
-    if isinstance(updated.get("data_sources"), list):
-        skill["data_sources"] = updated.get("data_sources")
-        skill["config_mode"] = "advanced"
-        changed = True
-    if isinstance(updated.get("campaign_items"), list):
-        skill["campaign_items"] = updated.get("campaign_items")
-        skill["config_mode"] = "advanced"
-        changed = True
-    if isinstance(updated.get("missing_fields"), list):
-        skill["missing_fields"] = updated.get("missing_fields")
-        changed = True
-    if not changed:
-        return False
-    skill["is_default"] = False
-    skill["revision"] = max(1, int(skill.get("revision") or 1)) + 1
-    skill["updated_at"] = now
-    return True
-
-
-def process_one_operations_request(state: dict[str, Any]) -> bool:
-    """Process one queued release/operations conversation turn."""
-
-    model, storage = _read_operations_model(state)
-    if storage == "none":
-        return False
-    request = next(
-        (
-            row for row in model.get("agent_requests") or []
-            if isinstance(row, dict) and str(row.get("status") or "") == "queued"
-        ),
-        None,
-    )
-    if request is None:
-        return False
-    request_id = str(request.get("id") or "")
-    kind = str(request.get("kind") or "chat")
-    user_text = str(request.get("text") or "").strip()
-    if user_text:
-        maybe_apply_persona_updates_from_message(state, user_text, source="operations_chat")
-    if kind == "deploy":
-        text = str(request.get("text") or "").strip() or (
-            "请严格按照当前上线 Skill 检查并执行上线；涉及凭据、付费、公开发布或其他高风险操作时先向用户确认。"
-        )
-        inbox = run_dir(state["run_id"]) / "inbox"
-        inbox.mkdir(parents=True, exist_ok=True)
-        message_id = "web-in-" + uuid.uuid4().hex
-        now = utcnow()
-        filename = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + f"-{uuid.uuid4().hex}.json"
-        atomic_json(
-            inbox / filename,
-            {
-                "message_id": message_id,
-                "body": text,
-                "text": text,
-                "channel": "main",
-                "pending_id": "",
-                "matched_pending_id": "",
-                "attachment_ids": [],
-                "attachments": [],
-                "created_at": now,
-            },
-        )
-        request.update({"status": "completed", "updated_at": now, "error": ""})
-        agent = _operations_agent_state(model, state)
-        agent.update({
-            "status": "completed",
-            "current_request_id": request_id,
-            "current_action": "",
-            "updated_at": now,
-            "last_error": "",
-        })
-        _write_operations_model(state, model, storage)
-        event(state, "operations_deploy_rerouted_to_developer", request_id=request_id)
-        return True
-    now = utcnow()
-    request.update({"status": "running", "updated_at": now, "error": ""})
-    agent = _operations_agent_state(model, state)
-    agent.update({
-        "status": "running",
-        "current_request_id": request_id,
-        "current_action": "Replying to the user",
-        "updated_at": now,
-        "last_error": "",
-    })
-    _write_operations_model(state, model, storage)
-    prompt = prompt_json(
-        "You are the operations agent for this application. Reply concisely in the user's language. "
-        "You manage two separate operational domains: (1) data statistics — in-app safe event tracking, "
-        "authorized analytics sources, and aggregate dashboard metrics; (2) traffic acquisition — ad platforms, "
-        "delivery method, budget, schedule, and trigger conditions. Use the skills below for each domain. "
-        "Release/deploy work belongs to the developer agent; do not execute deployment here. "
-        "Do not claim success without evidence. Before credentials, payment, public release, ad spend, "
-        "destructive changes, or system-level changes, explain the exact action and ask for explicit confirmation. "
-        "Update analytics_skill or traffic_skill only when the user's request clearly changes that domain; "
-        "otherwise return null. Structured skill objects may include summary, config_mode, data_sources, "
-        "campaign_items, and missing_fields. When required information such as website URLs or API endpoints "
-        "is missing, ask one focused follow-up question and populate missing_fields so the UI can guide the user. "
-        "When the user asks to add, remove, or update virtual users / target audience personas, include persona_operations "
-        "with add/update/remove entries. Only change personas when the user clearly requests audience or persona changes.",
-        {
-            "request": {"kind": kind, "text": str(request.get("text") or "")[:4000]},
-            "analytics_skill": (model.get("analytics_skill") or model.get("operations_skill") or {}),
-            "traffic_skill": (model.get("traffic_skill") or {}),
-            "traffic_state": model.get("traffic_state") or {},
-            "public_environment": model.get("public_environment") or {},
-            "available_metrics": {
-                key: value for key, value in (model.get("metrics") or {}).items()
-                if isinstance(value, dict) and value.get("status") == "available"
-            },
-        },
-    )
-    try:
-        result = call_claude(
-            state,
-            "operations",
-            prompt,
-            OPERATIONS_AGENT_REPLY_SCHEMA,
-            writable=kind == "deploy",
-        )
-        model, storage = _read_operations_model(state)
-        request = next(
-            (row for row in model.get("agent_requests") or [] if isinstance(row, dict) and row.get("id") == request_id),
-            None,
-        )
-        if request is None:
-            return True
-        now = utcnow()
-        request.update({"status": "completed", "updated_at": now, "error": ""})
-        reply = str(result.get("reply") or "").strip()[:6000] or "本次运营请求已处理。"
-        request_text = lifecycle_safe_text(request.get("text"), "", limit=280)
-        model.setdefault("messages", []).append({
-            "id": "opmsg-" + uuid.uuid4().hex,
-            "actor": "agent",
-            "body": reply,
-            "created_at": now,
-            "request_id": request_id,
-            "reply_to": {
-                "message_id": request_id,
-                "body": request_text,
-            },
-        })
-        model["messages"] = model["messages"][-160:]
-        for key in ("analytics_skill", "traffic_skill", "operations_skill"):
-            updated = result.get(key)
-            if updated is None:
-                continue
-            if isinstance(updated, str) and not updated.strip():
-                continue
-            if isinstance(updated, dict) and not updated:
-                continue
-            target_key = "analytics_skill" if key == "operations_skill" else key
-            skill = model.setdefault(target_key, {})
-            if not isinstance(skill, dict):
-                skill = {}
-                model[target_key] = skill
-            _merge_operations_skill_update(skill, updated, now=now)
-        if isinstance(model.get("analytics_skill"), dict):
-            model["operations_skill"] = json.loads(json.dumps(model["analytics_skill"], ensure_ascii=False))
-        persona_operations = result.get("persona_operations")
-        if isinstance(persona_operations, list) and persona_operations:
-            try:
-                apply_persona_mutations(state, persona_operations, source="operations_agent")
-            except WorkflowError as exc:
-                reply = f"{reply}\n\n（虚拟用户调整未生效：{str(exc)[:200]}）"
-        traffic_state = result.get("traffic_state")
-        if isinstance(traffic_state, dict) and traffic_state:
-            model["traffic_state"] = {
-                **(model.get("traffic_state") if isinstance(model.get("traffic_state"), dict) else {}),
-                **traffic_state,
-                "updated_at": now,
-            }
-        session = state.get("sessions", {}).get("operations", {})
-        agent = _operations_agent_state(model, state)
-        agent.update({
-            "session_id": str(session.get("id") or ""),
-            "status": "completed",
-            "current_request_id": request_id,
-            "current_action": "",
-            "updated_at": now,
-            "last_error": "",
-        })
-        _write_operations_model(state, model, storage)
-        event(state, "operations_request_completed", request_id=request_id, request_kind=kind)
-    except Exception as exc:
-        model, storage = _read_operations_model(state)
-        request = next(
-            (row for row in model.get("agent_requests") or [] if isinstance(row, dict) and row.get("id") == request_id),
-            None,
-        )
-        if request is not None:
-            reason = operations_public_worker_retry_reason(str(exc))
-            now = utcnow()
-            request.update({"status": "error", "updated_at": now, "error": reason[:500]})
-            agent = _operations_agent_state(model, state)
-            agent.update({
-                "status": "error",
-                "current_request_id": request_id,
-                "current_action": "",
-                "updated_at": now,
-                "last_error": reason[:500],
-            })
-            model.setdefault("messages", []).append({
-                "id": "opmsg-" + uuid.uuid4().hex,
-                "actor": "agent",
-                "body": f"暂时无法完成：{reason}",
-                "created_at": now,
-                "request_id": request_id,
-            })
-            _write_operations_model(state, model, storage)
-        event(state, "operations_request_failed", request_id=request_id, request_kind=kind, error_type=type(exc).__name__)
-    return True
 
 
 def public_worker_retry_reason(error: str, state: dict[str, Any] | None = None) -> str:
@@ -27816,20 +25378,6 @@ def public_worker_retry_reason(error: str, state: dict[str, Any] | None = None) 
             return f"Claude Code 单次调用预算已用尽（${budget:g}）"
         return "Claude Code 单次调用预算已用尽"
     return "后台研发步骤暂时失败"
-
-
-def operations_public_worker_retry_reason(error: str) -> str:
-    """Map worker failures for operations chat/deploy turns to user-facing copy."""
-
-    mapped = public_worker_retry_reason(error)
-    operations_overrides = {
-        "后台研发步骤暂时失败": "运营智能体本次处理失败",
-        "发送给研发智能体的上下文过大": "运营对话上下文过大",
-        "研发服务当前请求较多": "运营服务当前请求较多",
-        "研发服务本次响应超时": "运营智能体本次响应超时",
-        "研发结果格式需要自动整理": "运营结果格式需要自动整理",
-    }
-    return operations_overrides.get(mapped, mapped)
 
 
 def worker_retry_reason_code(error: str, state: dict[str, Any] | None = None) -> str:
@@ -28289,7 +25837,7 @@ def wait_for_stop(
 
 
 def classify_safety_hold(exc: BaseException, state: dict[str, Any]) -> dict[str, Any]:
-    """Return a stable, participant-safe recovery contract for a fatal error."""
+    """Return a stable, user-safe recovery contract for a fatal error."""
 
     detail = f"{type(exc).__name__}: {exc}"
     folded = detail.casefold()
@@ -28379,7 +25927,7 @@ def prepare_recovery_resume(state: dict[str, Any]) -> None:
             RELEASE_EVALUATOR_ATTEMPT_SEMANTICS_VERSION
         )
     elif reason_code == "release_evaluator_model_mismatch":
-        contract = study_evaluator_contract(state)
+        contract = release_evaluator_contract(state)
         overrides = state.setdefault("role_model_overrides", {})
         if not isinstance(overrides, dict):
             overrides = state["role_model_overrides"] = {}
@@ -28537,7 +26085,7 @@ def run_workflow(
                 control.update(status="running", updated_at=now_text, started_at=now_text)
             if control_generation and isinstance(request, dict):
                 request.update(status="running", updated_at=now_text, started_at=now_text)
-            # Participant workflows are supervised services.  An older build
+            # User workflows are supervised services.  An older build
             # persisted STOPPED as the active phase, so merely launching a new
             # worker would immediately exit its main loop.  A durable Resume
             # restores the last safe phase before the child advertises itself
@@ -28681,8 +26229,6 @@ def run_workflow(
                         send_pending_question(state, mailer)
                     messages: list[dict[str, Any]] = []
                     web_message_serviced = False
-                    operations_request_serviced = False
-                    operations_refresh_serviced = False
                     if state.get("channel") == "web":
                         web_message_serviced = service_priority_web_messages(
                             state,
@@ -28702,26 +26248,13 @@ def run_workflow(
                             state["imap_retry_after"] = time.time() + max(60, int(state["poll_seconds"]))
                             event(state, "imap_retry", error=state["last_mail_error"])
                             save_state(state)
-                    if not web_message_serviced and not messages:
-                        # Operations chat/deploy turns run between workflow
-                        # tasks. Fresh developer messages still keep priority.
-                        operations_request_serviced = process_one_operations_request(state)
-                        if not operations_request_serviced:
-                            # A refresh is one independent read-only turn.
-                            operations_refresh_serviced = process_one_operations_refresh(state)
                     if web_message_serviced:
                         # Re-enter the scheduler after every user turn so the
                         # next task is built from the newly updated context.
                         pass
                     elif messages:
                         process_inbound_message(state, mailer, messages[0])
-                    elif operations_request_serviced:
-                        pass
-                    elif operations_refresh_serviced:
-                        pass
                     elif process_one_iteration_feedback_cycle(state, mailer):
-                        pass
-                    elif process_eufr_p0_feedback_cycle(state, mailer):
                         pass
                     elif service_next_owner_acceptance(state):
                         # Source-bound Owner-intent acceptance is an independent
@@ -28794,7 +26327,7 @@ def run_workflow(
                         break
                 except WorkflowStopRequested:
                     with contextlib.suppress(Exception):
-                        recover_study_preview_checkpoint(state)
+                        recover_preview_checkpoint(state)
                     stop_consumed_from_phase = str(state.get("phase") or "PLAN")
                     state["stopped_from_phase"] = state["phase"]
                     state["phase"], state["status"] = "STOPPED", "stopped"
@@ -28857,7 +26390,7 @@ def run_workflow(
                     if str(state.get("phase") or "").upper() == "DEVELOP":
                         with contextlib.suppress(Exception):
                             recovered_checkpoint = (
-                                recover_study_preview_checkpoint(state)
+                                recover_preview_checkpoint(state)
                                 or usable_development_preview_checkpoint(state)
                             )
                     if (
@@ -29070,10 +26603,6 @@ def new_state(args: argparse.Namespace) -> dict[str, Any]:
         raise WorkflowError(f"不支持的 coding agent: {coding_agent}")
     if channel == "email" and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email_address):
         raise WorkflowError("邮件通道需要有效的 --email 用户邮箱")
-    study_evaluation_protocol = normalize_study_evaluation_protocol(
-        getattr(args, "study_evaluation_protocol_json", "")
-    )
-    study_condition = ""
     initial_files: list[str] = []
     seen_initial_files: set[str] = set()
     raw_initial_files = list(getattr(args, "input_file", None) or [])
@@ -29192,8 +26721,6 @@ def new_state(args: argparse.Namespace) -> dict[str, Any]:
         "mail_provider": args.mail_provider or "",
         "model": args.model or "",
         "role_model_overrides": {},
-        "study_evaluation_protocol": study_evaluation_protocol,
-        "study_condition": study_condition,
         "release_evaluator_attempt_semantics_version": RELEASE_EVALUATOR_ATTEMPT_SEMANTICS_VERSION,
         "release_evaluator_attempts": {},
         "release_evaluator_transport_failures": {},
@@ -29499,14 +27026,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--ui-locale",
         choices=("zh-CN", "en"),
         default=app_i18n.normalize_locale(os.environ.get("WF_UI_LOCALE", "zh-CN")),
-        help="Participant-facing language persisted before the first planning turn.",
+        help="User-interface language persisted before the first planning turn.",
     )
     start.add_argument("--mcp-config", default=os.environ.get("WF_MCP_CONFIG", ""))
-    start.add_argument(
-        "--study-evaluation-protocol-json",
-        default="",
-        help=argparse.SUPPRESS,
-    )
     start.add_argument("--max-budget-usd", type=float, default=None, help="兼容旧参数；建议改用 coding_agent_cli_args 或 Web 高级参数")
     start.add_argument("--agent-timeout", type=int, default=int(os.environ.get("WF_AGENT_TIMEOUT", "3600")))
     start.add_argument("--poll-seconds", type=int, default=int(os.environ.get("WF_POLL_SECONDS", "45")))

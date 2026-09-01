@@ -91,6 +91,18 @@ def resolve_projects_dir(raw: str) -> Path:
     return value
 
 
+def resolve_state_dir(raw: str) -> Path:
+    """Resolve and create the repository-local runtime state directory."""
+
+    value = Path(str(raw or "./state")).expanduser()
+    if not value.is_absolute():
+        value = (ROOT / value).resolve()
+    else:
+        value = value.resolve()
+    value.mkdir(parents=True, exist_ok=True)
+    return value
+
+
 def build_argv(config: dict, extra: list[str]) -> list[str]:
     """Build workflow_web.main arguments from config, then append user flags."""
 
@@ -119,6 +131,9 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     config = load_config(CONFIG_PATH)
     apply_llm_env(config.get("llm") or {})
+    os.environ["WF_AGENT_HOME"] = str(
+        resolve_state_dir(str(config.get("state_dir") or "./state"))
+    )
     return workflow_web.main(build_argv(config, args))
 
 

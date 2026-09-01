@@ -99,7 +99,7 @@ class BrowserSurfaceConfig:
     device_name: str
     runtime_dir: Path
     proxy_url: str = ""
-    # Managed AppLooper surfaces pass a directory below the participant's
+    # Managed AppLooper surfaces pass a directory below the user's
     # durable WF_AGENT_HOME volume.  The optional form keeps standalone callers
     # on the former disposable-profile behavior.
     profile_dir: Path | None = None
@@ -360,7 +360,7 @@ class BrowserSurfaceRuntime:
             "--disable-default-apps",
             "--disable-extensions",
             "--disable-gpu-shader-disk-cache",
-            # Keep disposable network/media caches bounded on the participant
+            # Keep disposable network/media caches bounded on the user
             # state volume. Origin data such as localStorage and IndexedDB is
             # deliberately not cleared across runtime generations.
             "--disk-cache-size=33554432",

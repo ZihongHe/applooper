@@ -21,6 +21,7 @@ private.local.json
 
 # Workspaces created by the local agent
 workspaces/
+state/
 projects/
 runtime/
 logs/

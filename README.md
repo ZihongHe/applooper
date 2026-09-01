@@ -42,6 +42,7 @@ Edit `config.yaml`:
 host: 127.0.0.1
 port: 8765
 projects_dir: ./workspaces   # or an absolute local folder
+state_dir: ./state           # local AppLooper state
 
 llm:
   provider: ""          # agnes | claude | openrouter | custom
@@ -87,10 +88,10 @@ python run.py --port 8765
 1. Click **New** in the left sidebar.
 2. Enter audience, app type, and description.
 3. Choose Claude Code or Codex (whichever is installed on this machine).
-4. Set **Workspace** to an existing project folder, or browse and create a new folder.
-5. Submit. AppLooper works inside that folder and does not create an extra nested project unless you ask it to.
+4. To start from scratch, keep **Workspace** set to the configured `projects_dir`; AppLooper creates an app-specific child folder there. To continue an existing project, enter its absolute folder path.
+5. Submit. AppLooper confines development work to the selected workspace.
 
-You can add unlimited apps. Each app has its own workspace path.
+You can add unlimited apps. Each app has its own workspace path. Runtime state is stored under `state_dir` and is ignored by Git.
 
 ## Add apps
 
@@ -103,7 +104,7 @@ Open an app, go to the **Publish** tab, and click **Download package**. This cal
 ## Secrets
 
 - Put keys only in `config.yaml`.
-- Do not commit a filled `config.yaml`, `.env`, or `private.local.json`.
+- Do not commit a filled `config.yaml` or `.env` file.
 - `.gitignore` ignores `.env`, `workspaces/`, and `*.key`. `config.yaml` is committed with empty fields; do not commit filled keys.
 - Before you commit, confirm `git status` does not list a filled config.
 - `config.example.yaml` is the safe template to share.
