@@ -4245,8 +4245,45 @@ def _freeze_reviewable_prototype(
     return True
 
 
+def restore_completed_round_limit_delivery(state: dict[str, Any]) -> bool:
+    """Restore review readiness for the frozen candidate after a worker retry."""
+
+    handoff = state.get("strict_round_limit_handoff")
+    if not isinstance(handoff, dict) or not handoff.get("completed"):
+        return False
+    phase = str(state.get("phase") or "").upper()
+    if phase in {"STOPPED", "PUBLISHED"} or isinstance(state.get("safety_hold"), dict):
+        return False
+    candidate = str(handoff.get("candidate_id") or "")
+    if not candidate or state.get("delivered_candidate") != candidate:
+        return False
+    readiness = state.get("candidate_readiness")
+    readiness = readiness if isinstance(readiness, dict) else {}
+    current_candidate = readiness.get("candidate_id")
+    if readiness.get("stage") == "published" or (
+        current_candidate and current_candidate != candidate
+    ):
+        return False
+    needs_phase = phase != "DELIVERED"
+    needs_hold_clear = isinstance(state.get("recovery_required"), dict)
+    if not (needs_phase or needs_hold_clear or readiness.get("stage") != "owner_review_ready"):
+        return False
+    state["phase"] = "DELIVERED"
+    state["status"] = "delivered_listening"
+    state.pop("recovery_required", None)
+    advance_candidate_readiness(
+        state, "owner_review_ready", candidate_id=candidate,
+        reason="strict_round_limit_handoff_restored",
+    )
+    event(
+        state, "strict_round_limit_handoff_restored", candidate_id=candidate,
+        previous_phase=phase, hold_cleared=needs_hold_clear,
+    )
+    return True
+
+
 def finalize_strict_round_limit_as_reviewable_prototype(state: dict[str, Any]) -> bool:
-    """Force the current candidate into pending-publish at the 50-step cap.
+    """Force the current candidate into pending-publish at the configured cap.
 
     When the relevant agents have not yet agreed to release, the workflow
     freezes the latest candidate as ready_to_publish so the owner can accept it.
@@ -5587,7 +5624,7 @@ def save_state(state: dict[str, Any]) -> None:
                     launch_id=worker_launch_id,
                     spawn_attempt_id=worker_spawn_attempt_id,
                 )
-                protected_keys = ["worker_control", "resume_request"]
+                protected_keys = ["worker_control", "resume_request", "worker_spawn_attempt_id"]
                 if not same_worker_still_owns_pid:
                     # Ownership moved/cleared: fence every control-plane field.
                     protected_keys.extend(
@@ -8315,6 +8352,8 @@ def migrate_state(state: dict[str, Any]) -> None:
             changed = True
         if finalize_strict_round_limit_as_reviewable_prototype(state):
             changed = True
+    if restore_completed_round_limit_delivery(state):
+        changed = True
     # Resume/launch failures against an intentional DELIVERED review boundary
     # must not leave the user-facing status as paused_error.
     delivered_boundary = str(state.get("phase") or "").upper() == "DELIVERED" or (

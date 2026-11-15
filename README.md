@@ -1,118 +1,67 @@
 # AppLooper
 
-AppLooper is a localhost web agent that builds and iterates applications in a folder on your own machine. You choose a workspace (a new folder or an existing project). The sidebar lets you add as many apps as you want. Each app uses the AppLooper multi-agent workflow: developer, virtual user, test, and owner-intent.
+AppLooper helps you build and revise applications from a local browser. Give it a target audience, an application type, and a description. The development agent implements changes, virtual users try the application, the test agent checks it, and the owner-intent agent retests changes requested by the owner. You can try each runnable version and send feedback from the browser.
 
-## Prerequisites
+This repository provides the local application builder. The [AppLooper preprint](https://arxiv.org/abs/2608.14093) describes the research system and its evaluation.
 
-- Python 3.11 or newer
-- A local coding CLI used by the developer agent:
-  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code), or
-  - Codex CLI
-- An API key for an LLM provider. Agnes AI, Anthropic Claude, and OpenRouter are included as examples; other OpenAI-compatible or Anthropic-compatible endpoints can be added in `config.yaml`
+## 1. Prepare Python and a coding CLI
 
-## Setup
+- Install [Git](https://git-scm.com/downloads) and Python 3.11 or newer. Use a recent browser with JavaScript enabled.
+- Install [Claude Code](https://code.claude.com/docs/en/quickstart) or [Codex CLI](https://github.com/openai/codex#quickstart). Verify that `claude --version` or `codex --version` works in the terminal you will use to start AppLooper.
+- Sign in to the coding CLI, or configure credentials supported by that CLI. AppLooper starts the CLI under your local user account and uses its authentication. Keep `llm.model` blank to use the CLI's default model.
+
+## 2. Set up and start AppLooper
+
+**Windows PowerShell**
+
+```powershell
+git clone https://github.com/ZihongHe/applooper.git
+cd applooper
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+if (!(Test-Path config.yaml)) { Copy-Item config.example.yaml config.yaml }
+.\.venv\Scripts\python.exe run.py
+```
+
+**macOS or Linux**
 
 ```bash
 git clone https://github.com/ZihongHe/applooper.git
 cd applooper
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# macOS / Linux:
-source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+test -f config.yaml || cp config.example.yaml config.yaml
+.venv/bin/python run.py
 ```
 
-Copy the example config if you do not already have `config.yaml`:
+Open [http://127.0.0.1:8765/](http://127.0.0.1:8765/) or the local URL printed by the server. Leave the terminal running. Press **Ctrl+C** there to stop AppLooper.
 
-```bash
-# Windows PowerShell
-Copy-Item config.example.yaml config.yaml
-# macOS / Linux
-cp config.example.yaml config.yaml
-```
+To change the port or workspace location, edit `port` or `projects_dir` in `config.yaml`. The defaults are `8765` and `./workspaces`. Runtime state is saved to `./state` by default. AppLooper resolves relative paths from the repository folder. `run.py` also accepts `--port` and `--projects-dir`.
 
-The repository also ships an empty `config.yaml`. Fill in your own keys. Never commit a filled file.
+### Optional model configuration
 
-## Fill config.yaml
+`config.yaml` is required. If your CLI is already authenticated, its `llm` fields can stay empty. `run.py` can also pass credentials to the CLI from this file.
 
-Edit `config.yaml`:
+| Configuration | Settings in `llm` |
+| --- | --- |
+| Claude Code with an Anthropic API key | `provider: claude` and `anthropic_api_key` |
+| Claude Code with Agnes AI | `provider: agnes` and `agnes_api_key`. Set `agnes_base_url` if your endpoint differs from the example. |
+| Claude Code with a compatible gateway | `provider: custom`, `api_key`, and `base_url`. The gateway must support Claude Code's API requests. |
+| Codex CLI | Configure the provider and authentication in Codex using its own settings. |
 
-```yaml
-host: 127.0.0.1
-port: 8765
-projects_dir: ./workspaces   # or an absolute local folder
-state_dir: ./state           # local AppLooper state
+Review the example before editing `config.yaml`. If a credential or endpoint variable is already set in the launching shell, `run.py` leaves its value in place.
 
-llm:
-  provider: ""          # agnes | claude | openrouter | custom
-  agnes_api_key: ""
-  agnes_base_url: "https://api.agnes-ai.cn/v1"
-  anthropic_api_key: ""
-  openrouter_api_key: ""
-  api_key: ""           # generic key for another provider
-  base_url: ""          # OpenAI-compatible or Anthropic-compatible endpoint
-  model: ""
-```
+## 3. Build, try, and export an application
 
-| Provider | Fields to fill | Notes |
-| --- | --- | --- |
-| Agnes AI | `provider: agnes`, `agnes_api_key`, optional `model` | Uses `agnes_base_url` |
-| Claude (Anthropic) | `provider: claude`, `anthropic_api_key`, optional `model` | Official Anthropic API |
-| OpenRouter | `provider: openrouter`, `openrouter_api_key`, optional `model` | Routed through OpenRouter |
-| Other LLM | `provider: custom`, `api_key`, `base_url`, optional `model` | Any OpenAI-compatible or Anthropic-compatible endpoint |
+1. Choose **New**. Fill in **Who is it for?**, **Application type**, and **Description**. For a first run, try a task planner that lets a student add tasks and mark them complete.
+2. Select your installed coding CLI. Keep the suggested **Workspace folder** to have AppLooper allocate an app folder under the configured workspace root. Enter an absolute path to work in a specific local folder. Click **Create**.
+3. Open **Develop** to follow the build and send feature requests or changes. When the application is runnable, open **Trial** to use it and share feedback. Return to **Trial** after revisions to check the result.
+4. When ready, choose **Publish** → **Download package** to export the application as a source ZIP. Review that ZIP before sharing it or deploying it yourself.
 
-These three named providers are examples, not a closed list. To add another service, set `provider: custom` and fill `api_key` plus `base_url`. Leave unused key fields empty. `run.py` exports keys to environment variables (`AGNES_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_BASE_URL` when needed). It never prints secret values.
+If the coding CLI is unavailable in **New**, verify that it is on `PATH`, then restart AppLooper from the same terminal. If a build reports an authentication error, open that CLI directly to check its login or provider configuration.
 
-`projects_dir` is the parent folder for workspaces. Use `./workspaces` or an absolute path such as `C:\Users\you\Documents\my-apps`.
-
-You can also pass `--projects-dir` when starting, which overrides the config value.
-
-## Start
-
-```bash
-python run.py
-```
-
-Open the printed URL, usually `http://127.0.0.1:8765/`.
-
-Optional flags are forwarded to the web service, for example:
-
-```bash
-python run.py --projects-dir "D:\apps"
-python run.py --port 8765
-```
-
-## Choose or create a workspace
-
-1. Click **New** in the left sidebar.
-2. Enter audience, app type, and description.
-3. Choose Claude Code or Codex (whichever is installed on this machine).
-4. To start from scratch, keep **Workspace** set to the configured `projects_dir`; AppLooper creates an app-specific child folder there. To continue an existing project, enter its absolute folder path.
-5. Submit. AppLooper confines development work to the selected workspace.
-
-You can add unlimited apps. Each app has its own workspace path. Runtime state is stored under `state_dir` and is ignored by Git.
-
-## Add apps
-
-The left sidebar lists every app on this machine. Use **New** as many times as you need. There is no app cap.
-
-## Download the package
-
-Open an app, go to the **Publish** tab, and click **Download package**. This calls `/api/apps/{id}/source-export` and downloads a zip of the current app source with secret values removed.
-
-## Secrets
-
-- Put keys only in `config.yaml`.
-- Do not commit a filled `config.yaml` or `.env` file.
-- `.gitignore` ignores `.env`, `workspaces/`, and `*.key`. `config.yaml` is committed with empty fields; do not commit filled keys.
-- Before you commit, confirm `git status` does not list a filled config.
-- `config.example.yaml` is the safe template to share.
+Keep the server bound to `127.0.0.1` for this setup. Use a workspace you own and are comfortable allowing the coding agent to modify. Keep credentials, private data, `state/`, and `workspaces/` out of version control. If `config.yaml` is tracked in your checkout, check `git diff -- config.yaml` before staging changes.
 
 ## License
 
-Personal and non-commercial use (including public-interest, educational, and non-profit use) is unrestricted.
-
-Commercial use requires a written license from the author. Email **zihong_he@outlook.com** to apply, and describe your intended business use.
-
-See `LICENSE` for the full terms.
+See the [AppLooper Personal License](LICENSE) for personal, research, educational, and other non-commercial use. Commercial use requires a written license. Contact [Zihong He](mailto:zihong_he@outlook.com) with the intended use.

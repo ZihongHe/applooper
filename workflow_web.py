@@ -2972,6 +2972,7 @@ class WorkflowWebService:
         self._remote_display_warm_pending: list[tuple[str, str]] = []
         self._remote_display_warm_thread: threading.Thread | None = None
         self._surface_preparation_threads: dict[tuple[str, str], threading.Thread] = {}
+        self._surface_preparation_lock = threading.RLock()
         self._managed_web_preview_lock = threading.RLock()
         self._managed_web_previews: dict[tuple[str, str], ManagedWebPreview] = {}
         self._surface_profile_lock = threading.RLock()
@@ -4662,11 +4663,21 @@ class WorkflowWebService:
             # are intentionally absent from lightweight Web/read fixtures.
             strict_hold = state.get("recovery_required")
             strict_hold = strict_hold if isinstance(strict_hold, dict) else {}
-            if (
-                state.get("strict_round_limit_reached")
-                or str(strict_hold.get("reason_code") or "") == "strict_round_limit_reached"
-            ):
+            completed_handoff = state.get("strict_round_limit_handoff")
+            readiness = state.get("candidate_readiness")
+            readiness = readiness if isinstance(readiness, dict) else {}
+            cap_reached = state.get("strict_round_limit_reached") or str(
+                strict_hold.get("reason_code") or ""
+            ) == "strict_round_limit_reached"
+            restore_needed = isinstance(completed_handoff, dict) and completed_handoff.get("completed") and (
+                str(state.get("phase") or "").upper() != "DELIVERED"
+                or isinstance(state.get("recovery_required"), dict)
+                or readiness.get("stage") != "owner_review_ready"
+            )
+            if cap_reached or restore_needed:
                 def finalize_latest(latest: dict[str, Any]) -> tuple[bool, None]:
+                    if workflow_agent.restore_completed_round_limit_delivery(latest):
+                        return True, None
                     latest_hold = latest.get("recovery_required")
                     latest_hold = latest_hold if isinstance(latest_hold, dict) else {}
                     if not (
@@ -7132,15 +7143,47 @@ class WorkflowWebService:
             response = connection.getresponse()
             body = response.read(256 * 1024)
             content_type = str(response.getheader("Content-Type") or "").casefold()
-            return 200 <= response.status < 400 and (
+            sample = body[:4096].lower()
+            if re.search(rb"<title>\s*directory listing(?:\s|<)", sample):
+                return False
+            html_ok = 200 <= response.status < 400 and (
                 "text/html" in content_type
-                or b"<!doctype html" in body[:4096].lower()
-                or b"<html" in body[:4096].lower()
+                or b"<!doctype html" in sample
+                or b"<html" in sample
             )
+            return html_ok and WorkflowWebService._probe_managed_preview_linked_static_css(entry, body)
         except (OSError, http.client.HTTPException, ValueError):
             return False
         finally:
             connection.close()
+
+    @staticmethod
+    def _probe_managed_preview_linked_static_css(entry: str, html: bytes) -> bool:
+        """Check the stylesheet paths used by Flask-style previews."""
+        hrefs = re.findall(
+            rb"""(?i)href=["'](/static/[^"'?#]+\.css)(?:[?#][^"']*)?["']""",
+            html[:16_384],
+        )
+        if not hrefs:
+            return True
+        parsed = urllib.parse.urlsplit(entry)
+        for raw in dict.fromkeys(hrefs[:4]):
+            css = http.client.HTTPConnection(
+                str(parsed.hostname or "127.0.0.1"), int(parsed.port or 80), timeout=1.0
+            )
+            try:
+                css.request("GET", raw.decode("ascii", "replace"), headers={"Accept": "text/css,*/*"})
+                response = css.getresponse()
+                response.read(1024)
+                if not 200 <= response.status < 300:
+                    return False
+                if "text/html" in str(response.getheader("Content-Type") or "").casefold():
+                    return False
+            except (OSError, http.client.HTTPException, ValueError):
+                return False
+            finally:
+                css.close()
+        return True
 
     @staticmethod
     def _managed_web_preview_env(runtime_dir: Path, port: int) -> dict[str, str]:
@@ -7737,6 +7780,11 @@ class WorkflowWebService:
                 )
                 preparations[surface_id] = record
                 self._save_surface_preparation_state(state)
+        finally:
+            key = (run_id, surface_id)
+            with self._surface_preparation_lock:
+                if self._surface_preparation_threads.get(key) is threading.current_thread():
+                    self._surface_preparation_threads.pop(key, None)
 
     def start_experience_surface_preparation_session(
         self,
@@ -7764,21 +7812,34 @@ class WorkflowWebService:
                 preparations[surface_id] = record
                 self._save_surface_preparation_state(state)
             key = (run_id, surface_id)
-            active = self._surface_preparation_threads.get(key)
+            with self._surface_preparation_lock:
+                active = self._surface_preparation_threads.get(key)
             if active is not None and active.is_alive():
                 return self.experience_surface_runtime_contract(state, surface_id)
-            if str(record.get("phase") or "") not in {"configuring", "queued"}:
-                record.update({"phase": "queued", "updated_at": utcnow(), "last_error": ""})
-                preparations[surface_id] = record
-                self._save_surface_preparation_state(state)
+            started_at = utcnow()
+            record.update({
+                "phase": "queued",
+                "updated_at": started_at,
+                "attempt_started_at": started_at,
+                "attempt_count": int(record.get("attempt_count") or 0) + 1,
+                "previous_error": str(record.get("last_error") or "")[:500],
+                "last_error": "",
+            })
+            preparations[surface_id] = record
+            self._save_surface_preparation_state(state)
             thread = threading.Thread(
                 target=self._surface_preparation_worker,
                 args=(run_id, surface_id),
                 daemon=True,
                 name=f"AppLooper-SurfacePrep-{surface_id}",
             )
-            self._surface_preparation_threads[key] = thread
-            thread.start()
+            with self._surface_preparation_lock:
+                self._surface_preparation_threads[key] = thread
+                try:
+                    thread.start()
+                except RuntimeError:
+                    self._surface_preparation_threads.pop(key, None)
+                    raise
             return self.experience_surface_runtime_contract(state, surface_id)
 
     def experience_surface_runtime_contract(
